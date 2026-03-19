@@ -1,0 +1,67 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+wheels/
+.eggs/
+
+# Virtual environments / uv
+.venv/
+venv/
+.uv/
+
+# Testing
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+*.coveragerc
+
+# IDEs
+.vscode/
+.idea/
+*.iml
+
+# Data / generated
+data/synthetic_profiles.json
+data/eval_profiles.json
+data/validation_profiles.json
+*.db
+*.db-journal
+
+# MLflow
+mlruns/
+mlartifacts/
+
+# Training artifacts (generated — checked in manually for submission)
+artifacts/training/*.png
+artifacts/training/*.json
+artifacts/training/*.zip
+
+# Jupyter
+.ipynb_checkpoints/
+*.nbconvert.*
+
+# Environment
+.env
+.env.*
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Docker
+.dockerignore
+
+# Docs source PDF (keep md, exclude binary)
+docs/*.pdf
+.agents/

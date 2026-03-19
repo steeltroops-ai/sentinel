@@ -1,0 +1,123 @@
+version: "3.9"
+
+networks:
+  kive-network:
+    driver: bridge
+
+services:
+  tav:
+    build:
+      context: .
+      dockerfile: services/tav/Dockerfile
+    container_name: kive-tav
+    ports:
+      - "8001:8000"
+    networks:
+      - kive-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+  svp:
+    build:
+      context: .
+      dockerfile: services/svp/Dockerfile
+    container_name: kive-svp
+    ports:
+      - "8002:8000"
+    networks:
+      - kive-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+  fmd:
+    build:
+      context: .
+      dockerfile: services/fmd/Dockerfile
+    container_name: kive-fmd
+    ports:
+      - "8003:8000"
+    networks:
+      - kive-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+  mdc:
+    build:
+      context: .
+      dockerfile: services/mdc/Dockerfile
+    container_name: kive-mdc
+    ports:
+      - "8004:8000"
+    networks:
+      - kive-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+  tsi:
+    build:
+      context: .
+      dockerfile: services/tsi/Dockerfile
+    container_name: kive-tsi
+    ports:
+      - "8005:8000"
+    networks:
+      - kive-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+  orchestrator:
+    build:
+      context: .
+      dockerfile: services/orchestrator/Dockerfile
+    container_name: kive-orchestrator
+    ports:
+      - "8010:8000"
+    networks:
+      - kive-network
+    environment:
+      TAV_URL: "http://tav:8000"
+      SVP_URL: "http://svp:8000"
+      FMD_URL: "http://fmd:8000"
+      MDC_URL: "http://mdc:8000"
+      TSI_URL: "http://tsi:8000"
+      MLFLOW_TRACKING_URI: "file:///app/mlruns"
+    depends_on:
+      tav:
+        condition: service_healthy
+      svp:
+        condition: service_healthy
+      fmd:
+        condition: service_healthy
+      mdc:
+        condition: service_healthy
+      tsi:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    volumes:
+      - ./artifacts:/app/artifacts
+      - ./mlruns:/app/mlruns

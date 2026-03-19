@@ -1,0 +1,75 @@
+[dependency-groups]
+dev = [
+    "pytest>=8.2.0",
+    "pytest-asyncio>=0.23.6",
+    "httpx>=0.27.0",
+]
+
+[project]
+name = "sentinal"
+version = "0.1.0"
+description = "KIVE — Knowledge Integrity Verification Engine. RL-based expert fraud detection for ProNexus."
+authors = [
+    { name = "Mayank Pratap Singh", email = "steeltroops.ai@gmail.com" }
+]
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+
+dependencies = [
+    # RL + Gym
+    "gymnasium>=0.29.1",
+    "stable-baselines3>=2.3.2",
+
+    # NLP
+    "spacy>=3.7.4",
+    "sentence-transformers>=2.7.0",
+
+    # API
+    "fastapi>=0.111.0",
+    "uvicorn[standard]>=0.29.0",
+    "pydantic>=2.7.0",
+    "httpx>=0.27.0",
+
+    # Data + DB
+    "faker>=25.1.0",
+    "numpy>=1.26.4",
+    "pandas>=2.2.2",
+    "sqlalchemy>=2.0.30",
+
+    # Experiment Tracking
+    "mlflow>=2.13.0",
+    "zenml>=0.57.1",
+
+    # Visualization
+    "matplotlib>=3.9.0",
+    "seaborn>=0.13.2",
+
+    # Utilities
+    "python-dotenv>=1.0.1",
+    "rich>=13.7.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["kive", "services"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+select = ["E", "F", "I", "N", "W"]
+ignore = ["E501"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
