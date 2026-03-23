@@ -1,73 +1,75 @@
-# Strategy Memo — KIVE (Knowledge Integrity Verification Engine)
-# Mayank Pratap Singh | steeltroops.ai@gmail.com
+# Strategy Memo: KIVE (Knowledge Integrity Verification Engine)
 
-## The Problem
+## The Core Thesis
+Generative AI optimizes for the most probable, generic path to a correct answer. Human expertise is asymmetric; it is learned through catastrophic failure, idiosyncratic debugging, and nonlinear career decisions. 
 
-Current expertise fraud detection fails because it targets the wrong threat model.
-AI-generated text detectors measure perplexity — a property of the *output*, not
-the *operator*. The dominant attack vector is not pure AI generation: it is AI-assisted
-human fraud, where a person with surface-level knowledge uses LLMs to produce fluent,
-coherent professional responses. Perplexity scores collapse under this scenario because
-the human steers the generation and reviews the output. The result reads like a person.
-It scores like a person. It is not a person with the claimed experience.
+To detect an AI-augmented "expert," we must abandon technical trivia. We do not evaluate correctness. We evaluate the presence of context-specific imperfections that an LLM cannot seamlessly fabricate. We attack the constraints of the adversary's pipeline: latency, semantic homogeneity, and behavioral entropy.
 
-## The Correct Frame
+By structuring this as a Partially Observable Markov Decision Process (POMDP), we grant the agent a primary lever: the ability to actively induce friction and acquire information through targeted probes. 
 
-This is a Partially Observable MDP, not a classification task. The vetting agent begins
-with high uncertainty about a candidate's true expertise level and must take sequential
-actions — collecting signals, asking probe questions — to reduce that uncertainty before
-making a costly terminal decision.
+## The 9-Dimensional Signal Architecture (Feature Engineering)
+We extract 9 explicit, adversarial signals distributed across isolated microservices. 
 
-The asymmetric cost structure is critical to design for explicitly. A False Negative —
-passing a fraudster — costs the platform a damaged client relationship, failed project,
-and potential legal exposure. A False Positive — rejecting a real expert — costs one
-placement opportunity. Based on the assignment brief, False Negatives carry
-approximately 2.5x the business cost of False Positives. This ratio must be encoded
-in the reward function, not treated as a post-hoc threshold parameter.
+1. **Temporal Anchoring Violations (TAV)**
+   * Every technology has a verifiable birth date. LLMs hallucinate timelines.
+   * Claiming 10 years of Kubernetes experience in 2024 is physically impossible.
+   * We cross-reference the claimed duration against a pre-computed technology knowledge graph.
 
-## What KIVE Measures
+2. **Specificity Variance Profile (SVP)**
+   * Authentic experts are hyper-specific in their niche and vaguely generalized outside of it.
+   * LLMs maintain uniform fluency across all topics. They lack awareness of what they do not know. 
+   * We measure variance of named-entity density. Low variance = high AI probability.
 
-Five signals, selected for adversarial robustness:
+3. **Failure Memory Deficiency (FMD)**
+   * Real engineers remember catastrophic outages and database locks. 
+   * Fraudsters generate textbook, documentation-perfect answers devoid of "scar tissue."
+   * We scan sentence constructs for past-tense negation and situational debugging terms.
 
-**TAV (Temporal Anchoring Violations, weight 0.28)**: Technology release dates are
-external, immutable ground truth. Claimed experience duration that exceeds the
-physical maximum since a tool's release date cannot be manufactured with better
-prompts. This signal is the most adversarially durable in the system.
+4. **Market Demand Correlation (MDC)**
+   * Sudden retroactive skill inflation correlating tightly with market hype is an anomaly.
+   * We detect backdated injections of popular keywords (e.g., "LangChain," "RAG") into prior, unrelated job entries.
 
-**SVP (Specificity Variance Profile, weight 0.24)**: Real experts are hyper-specific
-in their domain and openly vague outside it. LLMs produce uniform fluency across all
-topics because the model does not have a domain boundary. Measuring variance of
-specificity across topics — not mean — reveals the AI assistance pattern.
+5. **Trajectory Smoothness Index (TSI)**
+   * Real careers have gaps, horizontal pivots, and tenure volatility.
+   * A perfectly monotonic Junior-to-Principal trajectory over exactly five years without gaps is statistically fabricated.
 
-**FMD (Failure Memory Deficiency, weight 0.20)**: LLMs optimize for correctness. They
-do not naturally produce specific production failure narratives with version numbers,
-root causes, and personal accountability. Real engineers have scars. Absence of war
-stories across multiple prompts is a strong, durable fraud indicator.
+6. **Behavioral Entropy Service (BES)**
+   * LLMs rely on copy-pasting or automated transcription software.
+   * We capture keystroke telemetry variance, paste-ratios, and window-blur events.
+   * Flat, non-bursty keystroke entropy indicates paste-and-send behavior.
 
-**MDC (Market Demand Correlation, weight 0.16)**: Retroactive skill inflation — 
-bulk skill additions 0-3 months after demand spikes — indicates resume padding to
-match job market trends rather than citing organic skill acquisition.
+7. **Linguistic Quality Assurance (LQA)**
+   * Generative models cluster around specific phrasing structures and vocabulary.
+   * We compute artifact density, scanning for syntactical tells uniquely produced by autoregressive text generation.
 
-**TSI (Trajectory Smoothness Index, weight 0.12)**: Fabricated CVs trend monotonically
-upward. Real careers include lateral moves, gaps, and pivots. A perfectly smooth
-progression over 8+ years is statistically anomalous for authentic professional history.
+8. **Cross-Candidate Similarity (CCS)**
+   * Fraud rings reuse the exact same prompt engineering setups.
+   * We project profiles into high-dimensional embedding space and flag tight clusters of identical "expert" personas.
 
-## Why RL is the Right Tool
+9. **Response Latency Slope (RSL)**
+   * Human cognitive load scales non-linearly with problem difficulty. 
+   * An LLM pipeline has a fixed, linear token-generation latency, regardless of conceptual density.
+   * We detect flattened response latency slopes across highly difficult technical inquiries.
 
-A static classifier assumes the signal distribution is fixed. It is not. Fraudster
-behavior adapts. The probe loop — where the agent actively generates targeted questions
-to resolve uncertainty — is only possible with an agent that has learned when
-uncertainty is high enough to warrant the information acquisition cost. DQN over a
-6-dimensional observation space learns this boundary from episode experience.
+## The Reinforcement Learning Framework
+Vetting is a sequential, partial-information game. We train an RL orchestrator to decide when to gather evidence and when to drop the hammer.
 
-The reward function encodes: True Pass = +1.0, True Reject = +1.0, False Negative = -2.5,
-False Positive = -1.0, Probe = -0.1. The agent learns to probe when belief is ambiguous
-and terminate when confidence justifies the decision cost.
+* **State Space:** 18D continuous vector encompassing belief, confidence, the 9 microservice scores, normalized probe counts, and live multi-modal data streams perfectly representing the candidate's state.
+* **Action Space:** Discrete 8-dimensional space.
+   * `PASS` / `REJECT`: Terminal decisions.
+   * `FLAG`: Escalation to a human operator when max uncertainty persists.
+   * `PROBE`: Targeted interrogations on specific weak-confidence domains.
+   * `ESCALATE_DIFFICULTY`, `PROBE_FAILURE_STORY`, `REQUEST_CODE_EXERCISE`, `HOLD`: Active adversarial friction mechanisms.
+* **Asymmetric Reward Calculus:** 
+   * `PROBE (-0.1)`: Information acquisition is never free.
+   * `TRUE PASS / TRUE REJECT (+1.0)`: Correct terminal state.
+   * `FALSE POSITIVE (-1.0)`: Rejecting a real expert is an opportunity cost.
+   * `FALSE NEGATIVE (-2.5)`: Hiring a fraudster destroys platform credibility. The agent is mathematically punished for unsafe approvals.
+* **Agent Core:** We implement `RecurrentPPO` with a `MlpLstmPolicy`. The Recurrent architecture allows the LSTM to retain hidden states across the probe sequences, effectively modeling the candidate's cumulative psychological breakdown over the interview.
 
-## What This Does Not Claim
+## The End-State (Production Paradigm)
+This is not a static classifier. It is a live, autonomous interrogator. 
 
-KIVE does not claim 100% detection. It claims asymmetric cost alignment and
-adversarial durability beyond perplexity-based approaches. The system degrades
-gracefully — FLAG routes to human review when the agent lacks sufficient confidence.
-Human reviewers receive the full signal breakdown and recommended probe questions,
-making their judgment more targeted than an unaided interview.
+By pushing the vetting process out to multi-modal live telemetry (gaze matching, audio latency tracking, keystroke analysis) and forcing the candidate to defend their knowledge in real-time, we break the attacker's compute pipeline. When an LLM delays an audio response by two seconds to process context, the agent will fire an `INTERRUPT` action, breaking the context window. 
+
+The defense is absolute. It is a mathematical counter-measure to the systemic deterioration of remote hiring trust.

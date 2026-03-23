@@ -26,6 +26,7 @@ class ScreeningResponse(BaseModel):
     question_id: str
     answer: str
     latency_ms: int
+    word_timing_variance: Optional[float] = None
     topic: Optional[str] = None          # "core" | "adjacent" | "edge"
     question_difficulty: Optional[str] = None  # "basic" | "intermediate" | "expert"
 
@@ -60,12 +61,12 @@ class FlagDetail(BaseModel):
 
 class ProbeSuggestion(BaseModel):
     question: str
-    target_dimension: str   # "TAV" | "SVP" | "FMD" | "MDC" | "TSI"
+    target_dimension: str   # "TAV" | "SVP" | "FMD" | "MDC" | "TSI" | "BES" | "LQA" | "CCS" | "RSL"
     expected_fraud_response_pattern: str
 
 
 class SignalResponse(BaseModel):
-    signal: str                                   # "TAV" | "SVP" | "FMD" | "MDC" | "TSI"
+    signal: str                                   # "TAV" | "SVP" | "FMD" | "MDC" | "TSI" | "BES" | "LQA" | "CCS" | "RSL"
     score: float = Field(ge=0.0, le=1.0)          # Fraud probability contribution
     confidence: float = Field(ge=0.0, le=1.0)    # Certainty of this score
     weight: float                                  # Fixed signal weight in belief computation

@@ -25,7 +25,7 @@ from kive.shared.schemas import (
 
 
 def build_app(
-    service_name: str,       # "TAV" | "SVP" | "FMD" | "MDC" | "TSI"
+    service_name: str,       # "TAV" | "SVP" | "FMD" | "MDC" | "TSI" | "BES" | "LQA" | "CCS" | "RSL"
     service_version: str,
     weight: float,
     detector_class: type,
