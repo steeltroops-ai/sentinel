@@ -1,4 +1,16 @@
-version: "3.9"
+
+x-kive-service: &kive-service
+  build:
+    context: .
+    dockerfile: Dockerfile
+  networks:
+    - kive-network
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+    interval: 30s
+    timeout: 5s
+    start_period: 15s
+    retries: 3
 
 networks:
   kive-network:
@@ -6,101 +18,84 @@ networks:
 
 services:
   tav:
-    build:
-      context: .
-      dockerfile: services/tav/Dockerfile
+    <<: *kive-service
     container_name: kive-tav
+    command: ["uvicorn", "services.tav.main:app", "--host", "0.0.0.0", "--port", "8000"]
     ports:
       - "8001:8000"
-    networks:
-      - kive-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 5s
-      start_period: 15s
-      retries: 3
 
   svp:
-    build:
-      context: .
-      dockerfile: services/svp/Dockerfile
+    <<: *kive-service
     container_name: kive-svp
+    command: ["uvicorn", "services.svp.main:app", "--host", "0.0.0.0", "--port", "8000"]
     ports:
       - "8002:8000"
-    networks:
-      - kive-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 5s
-      start_period: 15s
-      retries: 3
 
   fmd:
-    build:
-      context: .
-      dockerfile: services/fmd/Dockerfile
+    <<: *kive-service
     container_name: kive-fmd
+    command: ["uvicorn", "services.fmd.main:app", "--host", "0.0.0.0", "--port", "8000"]
     ports:
       - "8003:8000"
-    networks:
-      - kive-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 5s
-      start_period: 15s
-      retries: 3
 
   mdc:
-    build:
-      context: .
-      dockerfile: services/mdc/Dockerfile
+    <<: *kive-service
     container_name: kive-mdc
+    command: ["uvicorn", "services.mdc.main:app", "--host", "0.0.0.0", "--port", "8000"]
     ports:
       - "8004:8000"
-    networks:
-      - kive-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 5s
-      start_period: 15s
-      retries: 3
 
   tsi:
-    build:
-      context: .
-      dockerfile: services/tsi/Dockerfile
+    <<: *kive-service
     container_name: kive-tsi
+    command: ["uvicorn", "services.tsi.main:app", "--host", "0.0.0.0", "--port", "8000"]
     ports:
       - "8005:8000"
-    networks:
-      - kive-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 5s
-      start_period: 15s
-      retries: 3
+
+  bes:
+    <<: *kive-service
+    container_name: kive-bes
+    command: ["uvicorn", "services.bes.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8006:8000"
+
+  lqa:
+    <<: *kive-service
+    container_name: kive-lqa
+    command: ["uvicorn", "services.lqa.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8007:8000"
+
+  ccs:
+    <<: *kive-service
+    container_name: kive-ccs
+    command: ["uvicorn", "services.ccs.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8008:8000"
+
+  rsl:
+    <<: *kive-service
+    container_name: kive-rsl
+    command: ["uvicorn", "services.rsl.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8009:8000"
 
   orchestrator:
-    build:
-      context: .
-      dockerfile: services/orchestrator/Dockerfile
+    <<: *kive-service
     container_name: kive-orchestrator
+    command: ["uvicorn", "services.orchestrator.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
     ports:
       - "8010:8000"
-    networks:
-      - kive-network
     environment:
       TAV_URL: "http://tav:8000"
       SVP_URL: "http://svp:8000"
       FMD_URL: "http://fmd:8000"
       MDC_URL: "http://mdc:8000"
       TSI_URL: "http://tsi:8000"
-      MLFLOW_TRACKING_URI: "file:///app/mlruns"
+      BES_URL: "http://bes:8000"
+      LQA_URL: "http://lqa:8000"
+      CCS_URL: "http://ccs:8000"
+      RSL_URL: "http://rsl:8000"
     depends_on:
       tav:
         condition: service_healthy
@@ -112,12 +107,14 @@ services:
         condition: service_healthy
       tsi:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 5s
-      start_period: 20s
-      retries: 3
+      bes:
+        condition: service_healthy
+      lqa:
+        condition: service_healthy
+      ccs:
+        condition: service_healthy
+      rsl:
+        condition: service_healthy
     volumes:
       - ./artifacts:/app/artifacts
       - ./mlruns:/app/mlruns

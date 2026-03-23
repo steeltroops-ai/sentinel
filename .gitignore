@@ -62,6 +62,8 @@ Thumbs.db
 # Docker
 .dockerignore
 
-# Docs source PDF (keep md, exclude binary)
+# Docs source PDF (keep md, exclude binary) & Extra scripts
 docs/*.pdf
+docs/local/
 .agents/
+.local_scripts/
