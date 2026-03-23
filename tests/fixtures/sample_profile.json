@@ -1,0 +1,50 @@
+{
+  "candidate_id": "mock-candidate-7b3e-v1",
+  "profile": {
+    "employment_history": [
+      {
+        "title": "Software Engineer",
+        "company": "Startup Inc",
+        "start_year": 2018,
+        "end_year": 2020,
+        "skills": ["python", "react"]
+      },
+      {
+        "title": "Senior Backend Engineer",
+        "company": "Enterprise Corp",
+        "start_year": 2020,
+        "end_year": 2023,
+        "skills": ["kubernetes", "fastapi", "postgres"]
+      }
+    ],
+    "skill_timestamps": {
+      "kubernetes": "2020-04",
+      "fastapi": "2021-01",
+      "react": "2018-06",
+      "llm": "2023-02"
+    },
+    "education": [
+      {
+        "degree": "BS Computer Science",
+        "university": "State University",
+        "graduation_year": 2018
+      }
+    ]
+  },
+  "screening_responses": [
+    {
+      "question_id": "q_sys_design_01",
+      "answer": "For that highly scalable service, we used Kubernetes and scaled up the pods. We added Redis for caching to reduce database load. Next time, I think I would test the migration scripts better before prod deployments because once we dropped user data silently.",
+      "latency_ms": 18500,
+      "topic": "core",
+      "question_difficulty": "expert"
+    },
+    {
+      "question_id": "q_frontend_03",
+      "answer": "React hooks allow you to manage state in functional components without converting them to classes. It makes the code cleaner.",
+      "latency_ms": 4200,
+      "topic": "edge",
+      "question_difficulty": "basic"
+    }
+  ]
+}

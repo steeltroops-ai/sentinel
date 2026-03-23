@@ -149,6 +149,7 @@ class ScreeningResponse:
     question_id: str
     answer: str
     latency_ms: int
+    word_timing_variance: float
     topic: str
     question_difficulty: str
 
@@ -165,6 +166,7 @@ class ExpertProfile:
     screening_responses: list[ScreeningResponse] = dataclasses.field(default_factory=list)
     github_repos: list[dict] = dataclasses.field(default_factory=list)
     linkedin_delta: list[dict] = dataclasses.field(default_factory=list)
+    behavioral_telemetry: dict = dataclasses.field(default_factory=dict)
 
     def to_dict(self):
         return {
@@ -175,6 +177,7 @@ class ExpertProfile:
             "screening_responses": [r.to_dict() for r in self.screening_responses],
             "github_repos": self.github_repos,
             "linkedin_delta": self.linkedin_delta,
+            "behavioral_telemetry": self.behavioral_telemetry,
         }
 
     @classmethod
@@ -185,6 +188,7 @@ class ExpertProfile:
         p.screening_responses = [ScreeningResponse(**r) for r in d.get("screening_responses", [])]
         p.github_repos = d.get("github_repos", [])
         p.linkedin_delta = d.get("linkedin_delta", [])
+        p.behavioral_telemetry = d.get("behavioral_telemetry", {})
         return p
 
 
@@ -200,6 +204,17 @@ class RealExpertGenerator:
         profile.employment_history = self._build_career(career_start)
         profile.skill_timestamps = self._build_timestamps(career_start, primary_domain)
         profile.screening_responses = self._build_responses(primary_domain)
+        
+        # BES Telemetry: Organic typing, high entropy, low paste, corrections
+        profile.behavioral_telemetry = {
+            "keystroke_timings": [random.uniform(150, 400) for _ in range(50)],
+            "paste_events": [],
+            "backspace_count": random.randint(5, 20),
+            "total_chars_typed": 400,
+            "first_char_latency_ms": random.randint(1000, 3000),
+            "blur_events": [],
+            "scroll_back_count": random.randint(1, 4)
+        }
         return profile
 
     def _build_career(self, start_year: int) -> list[Role]:
@@ -266,6 +281,7 @@ class RealExpertGenerator:
             question_id="q_core_1",
             answer=story["answer"],
             latency_ms=latency,
+            word_timing_variance=round(random.uniform(0.65, 1.35), 3),
             topic="core",
             question_difficulty="expert",
         ))
@@ -275,6 +291,7 @@ class RealExpertGenerator:
             question_id="q_adjacent_1",
             answer=random.choice(REAL_ADJACENT_VAGUE),
             latency_ms=random.randint(3000, 8000),
+            word_timing_variance=round(random.uniform(0.70, 1.40), 3),
             topic="adjacent",
             question_difficulty="intermediate",
         ))
@@ -291,6 +308,17 @@ class FraudExpertGenerator:
         profile.employment_history = self._build_smooth_career(career_start)
         profile.skill_timestamps = self._build_inflated_timestamps(career_start)
         profile.screening_responses = self._build_uniform_responses()
+        
+        # BES Telemetry: Fraud typing, low entropy, high paste, no corrections
+        profile.behavioral_telemetry = {
+            "keystroke_timings": [random.uniform(50, 60) for _ in range(10)],
+            "paste_events": [{"byte_length": 380, "timestamp_ms": 11000}],
+            "backspace_count": 0,
+            "total_chars_typed": 400,
+            "first_char_latency_ms": random.randint(8000, 15000), # long wait, then paste
+            "blur_events": [{"duration_ms": 10000, "timestamp_ms": 2000}], # AI query window
+            "scroll_back_count": 0
+        }
         return profile
 
     def _build_smooth_career(self, start_year: int) -> list[Role]:
@@ -336,10 +364,22 @@ class FraudExpertGenerator:
         topics = list(FRAUD_GENERIC_ANSWERS.keys())
 
         for i, topic in enumerate(topics[:3]):
+            answer_text = FRAUD_GENERIC_ANSWERS[topic]
+            # 80% chance of LLM LQA artifact slip
+            if random.random() < 0.80:
+                artifact = random.choice([
+                    "It is important to note that ",
+                    "Certainly! Here is an overview. ",
+                    "In most cases, it depends on the context, but ",
+                    "As an AI, I can say that "
+                ])
+                answer_text = artifact + answer_text
+
             responses.append(ScreeningResponse(
                 question_id=f"q_{topic}_{i+1}",
-                answer=FRAUD_GENERIC_ANSWERS[topic],
+                answer=answer_text,
                 latency_ms=random.randint(2000, 3500),  # Uniform ~AI query time
+                word_timing_variance=round(random.uniform(0.02, 0.15), 3), # Robotic LLM streaming cadence
                 topic="core" if topic != "general_adjacent" else "adjacent",
                 question_difficulty="expert",
             ))
@@ -409,7 +449,7 @@ class ProfileGenerator:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate synthetic KIVE expert profiles")
-    parser.add_argument("--n", type=int, default=500, help="Total profiles to generate")
+    parser.add_argument("--n", type=int, default=5000, help="Total profiles to generate")
     parser.add_argument("--fraud-ratio", type=float, default=0.4)
     parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility")
     parser.add_argument("--output", type=str, default="data/synthetic_profiles.json")

@@ -88,35 +88,69 @@ class MDCDetector:
                         "lag_months": lag_months,
                     })
 
-        if not retroactive_hits:
-            return MDCResult(score=0.10, confidence=0.50)
+        score = 0.10
+        confidence = 0.50
+        flags = []
+        probe = None
 
-        n = len(retroactive_hits)
-        score = min(0.40 + n * 0.15, 0.85)  # MDC is corroborating — capped lower than TAV
-        confidence = min(0.45 + n * 0.10, 0.75)
+        if retroactive_hits:
+            n = len(retroactive_hits)
+            score = min(0.40 + n * 0.15, 0.85)
+            confidence = min(0.45 + n * 0.10, 0.75)
 
-        flags = [FlagDetail(
-            type="retroactive_skill_inflation",
-            description=(
-                f"{n} skill(s) added within {RETROACTIVE_LAG_MONTHS} months of demand spike. "
-                f"Pattern suggests resume padding to match job market trends."
-            ),
-            severity="medium" if n == 1 else "high",
-            evidence={"hits": retroactive_hits},
-        )]
+            flags.append(FlagDetail(
+                type="retroactive_skill_inflation",
+                description=(
+                    f"{n} skill(s) added within {RETROACTIVE_LAG_MONTHS} months of demand spike. "
+                    f"Pattern suggests resume padding to match job market trends."
+                ),
+                severity="medium" if n == 1 else "high",
+                evidence={"hits": retroactive_hits},
+            ))
 
-        probe = ProbeSuggestion(
-            question=(
-                f"You listed {retroactive_hits[0]['skill']} as a skill around "
-                f"{retroactive_hits[0]['claim_date']}. What were you specifically "
-                f"building with it at that time?"
-            ),
-            target_dimension="MDC",
-            expected_fraud_response_pattern=(
-                "Vague answer about 'exploring it' or 'learning it for a project' "
-                "without a concrete deliverable or codebase."
-            ),
-        )
+            probe = ProbeSuggestion(
+                question=(
+                    f"You listed {retroactive_hits[0]['skill']} as a skill around "
+                    f"{retroactive_hits[0]['claim_date']}. What were you specifically "
+                    f"building with it at that time?"
+                ),
+                target_dimension="MDC",
+                expected_fraud_response_pattern=(
+                    "Vague answer about 'exploring it' or 'learning it for a project' "
+                    "without a concrete deliverable or codebase."
+                ),
+            )
+
+
+
+        # --- Skill burst detection (NEW) ---
+        # Multiple skills added on the exact same date = fabrication burst
+        date_counts: dict[str, list[str]] = {}
+        for skill, ts_str in skill_timestamps.items():
+            ts_norm = str(ts_str).strip()
+            if ts_norm not in date_counts:
+                date_counts[ts_norm] = []
+            date_counts[ts_norm].append(skill)
+
+        burst_skills: list[str] = []
+        for date_str, skills_on_date in date_counts.items():
+            if len(skills_on_date) >= 3:  # 3+ skills on same date = suspicious
+                burst_skills.extend(skills_on_date)
+
+        if burst_skills:
+            burst_penalty = min(len(burst_skills) * 0.08, 0.25)
+            score = min(score + burst_penalty, 0.90)
+            confidence = min(confidence + 0.10, 0.80)
+            flags.append(FlagDetail(
+                type="skill_addition_burst",
+                description=(
+                    f"{len(burst_skills)} skills added on the same date. "
+                    f"Real skill acquisition is gradual. Bulk additions suggest "
+                    f"profile padding in a single session."
+                ),
+                severity="medium",
+                evidence={"burst_skills": burst_skills},
+            ))
 
         return MDCResult(
             score=round(score, 3),

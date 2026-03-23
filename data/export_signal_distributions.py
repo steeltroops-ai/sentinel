@@ -64,6 +64,10 @@ async def export(profiles_path: str, output_path: str, n: int = 200):
     from services.fmd.detector import FMDDetector
     from services.mdc.detector import MDCDetector
     from services.tsi.detector import TSIDetector
+    from services.bes.detector import BESDetector
+    from services.lqa.detector import LQADetector
+    from services.ccs.detector import CCSDetector
+    from services.rsl.detector import RSLDetector
 
     detectors = {
         "tav": TAVDetector(),
@@ -71,6 +75,10 @@ async def export(profiles_path: str, output_path: str, n: int = 200):
         "fmd": FMDDetector(),
         "mdc": MDCDetector(),
         "tsi": TSIDetector(),
+        "bes": BESDetector(),
+        "lqa": LQADetector(),
+        "ccs": CCSDetector(),
+        "rsl": RSLDetector(),
     }
     for d in detectors.values():
         await d.initialize()

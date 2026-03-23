@@ -1,9 +1,16 @@
 # services/orchestrator/train.py
-# End-to-end RL training: synthetic data -> ExpertFraudEnv -> DQN -> MLflow -> plots.
+# End-to-end RL training: synthetic data -> ExpertFraudEnv -> RecurrentPPO -> MLflow -> plots.
+#
+# Key design decisions:
+#   - n_steps=128 calibrated for avg episode length of 3-5 steps
+#   - ent_coef=0.05 for strong exploration early (decays via PPO clipping)
+#   - gamma=0.99 standard temporal discount
+#   - Probe counting fixed to track ALL non-terminal actions (PROBE_*)
 
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import os
 import sys
@@ -23,15 +30,15 @@ from services.orchestrator.signal_client import MockSignalClient
 
 def train(
     profiles_path: str,
-    n_episodes: int = 3000,
+    n_episodes: int = 5000,
     eval_window: int = 100,
-    run_name: str = "kive_dqn_v1",
+    run_name: str = "kive_ppo_v2",
     output_dir: str = "artifacts/training",
     use_mlflow: bool = True,
 ):
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
-    # --- Setup ---
+    # ---- Setup ----
     print(f"Loading profiles from {profiles_path}")
     gen = ProfileGenerator.from_file(profiles_path)
     client = MockSignalClient()
@@ -40,12 +47,15 @@ def train(
     # Gymnasium compliance check
     try:
         from gymnasium.utils.env_checker import check_env
-        check_env(env, warn=True)
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            check_env(env)
         print("gym.Env check: PASSED")
     except Exception as e:
         print(f"gym.Env check warning: {e}")
 
-    # --- MLflow ---
+    # ---- MLflow ----
     run = None
     if use_mlflow:
         try:
@@ -54,120 +64,150 @@ def train(
             run = mlflow.start_run(run_name=run_name)
             mlflow.log_params({
                 "n_episodes": n_episodes,
-                "agent": "DQN",
+                "agent": "RecurrentPPO",
                 "max_probes": env.MAX_PROBES,
-                "reward_fn": "FN=-2.5,FP=-1.0,TP=+1.0,TN=+1.0,PROBE=-0.1",
+                "max_steps": env.MAX_STEPS,
+                "reward_fn": "FN=-2.5,FP=-1.0,TP=+1.0,TN=+1.0,FLAG=+0.3/-0.2,PROBE=-0.05",
                 "fraud_ratio": gen.fraud_ratio,
+                "observation_dim": 18,
+                "action_dim": 7,
             })
         except Exception as e:
             print(f"MLflow unavailable: {e}. Continuing without tracking.")
             use_mlflow = False
 
-    # --- Agent ---
+    # ---- Agent Setup ----
     try:
-        from stable_baselines3 import DQN
-        agent = DQN(
-            "MlpPolicy", env,
+        from sb3_contrib import RecurrentPPO
+        from stable_baselines3.common.callbacks import BaseCallback
+
+        class KiveMetricsCallback(BaseCallback):
+            def __init__(self, eval_window=100, use_mlflow=False):
+                super().__init__(0)
+                self.eval_window = eval_window
+                self.use_mlflow = use_mlflow
+                self.episodes = 0
+                self.episode_rewards = []
+                self.probe_counts = []
+                self.fn_counts = []
+                self.fp_counts = []
+                self.traces = []
+
+            def _on_step(self) -> bool:
+                dones = self.locals.get("dones", [False])
+                if not dones[0]:
+                    return True
+
+                info = self.locals.get("infos", [{}])[0]
+                self.episodes += 1
+                self.episode_rewards.append(info.get("episode_reward", 0))
+
+                history = info.get("action_history", [])
+
+                # Count actual probes (PROBE_BES, PROBE_LQA, PROBE_CCS, PROBE_RSL)
+                probe_count = sum(1 for a in history if a.startswith("PROBE_"))
+                self.probe_counts.append(probe_count)
+
+                # FN/FP from terminal action
+                true_label = info.get("true_label")
+                last_action = history[-1] if history else "FLAG"
+                fn = 1 if (last_action == "PASS" and true_label == "FRAUD") else 0
+                fp = 1 if (last_action == "REJECT" and true_label == "REAL") else 0
+                self.fn_counts.append(fn)
+                self.fp_counts.append(fp)
+
+                self.traces.append({
+                    "true_label": true_label,
+                    "beliefs": info.get("belief_history", []),
+                    "actions": history,
+                })
+                if len(self.traces) > 20:
+                    self.traces.pop(0)
+
+                if self.episodes % self.eval_window == 0:
+                    w = self.episode_rewards[-self.eval_window:]
+                    pn = self.probe_counts[-self.eval_window:]
+                    fn_r = sum(self.fn_counts[-self.eval_window:]) / self.eval_window
+                    fp_r = sum(self.fp_counts[-self.eval_window:]) / self.eval_window
+
+                    metrics = {
+                        "mean_reward": float(np.mean(w)),
+                        "std_reward": float(np.std(w)),
+                        "fn_rate": fn_r,
+                        "fp_rate": fp_r,
+                        "mean_probes": float(np.mean(pn)),
+                    }
+                    print(
+                        f"Ep {self.episodes:5d} | reward={metrics['mean_reward']:+.3f} "
+                        f"| FN={metrics['fn_rate']:.3f} FP={metrics['fp_rate']:.3f} "
+                        f"| probes={metrics['mean_probes']:.2f}"
+                    )
+                    if self.use_mlflow:
+                        try:
+                            import mlflow
+                            mlflow.log_metrics(metrics, step=self.episodes)
+                        except Exception:
+                            pass
+                return True
+
+        # Hyperparameters calibrated for short-horizon POMDP
+        #   n_steps=128:     ~25-40 episodes per rollout buffer
+        #   batch_size=32:   small batches for high gradient signal
+        #   ent_coef=0.05:   aggressive exploration (critical for probe discovery)
+        #   gamma=0.99:      standard discount
+        #   learning_rate=5e-4: slightly higher LR for faster initial learning
+        #   n_epochs=8:      more passes over each batch
+        agent = RecurrentPPO(
+            "MlpLstmPolicy", env,
             verbose=0,
-            learning_starts=200,
-            buffer_size=10_000,
-            batch_size=64,
-            gamma=0.95,
-            exploration_fraction=0.3,
-            exploration_final_eps=0.05,
+            n_steps=128,
+            batch_size=32,
+            n_epochs=8,
+            gamma=0.99,
+            learning_rate=5e-4,
+            ent_coef=0.05,
+            clip_range=0.2,
+            max_grad_norm=0.5,
         )
         use_sb3 = True
-    except Exception:
+    except Exception as e:
+        print(f"SB3 setup failed: {e}")
         agent = None
         use_sb3 = False
-        print("SB3 not available — using Q-table fallback")
 
-    # --- Training loop ---
-    episode_rewards = []
-    probe_counts   = []
-    fn_counts      = []
-    fp_counts      = []
-    traces         = []
+    # ---- Training ----
+    if use_sb3:
+        # Estimate total timesteps: target episodes * avg_episode_length
+        # With MAX_STEPS=8, avg episode ~4 steps after learning
+        total_timesteps = n_episodes * 6
+        print(f"Training RecurrentPPO agent ({total_timesteps} timesteps, ~{n_episodes} episodes)...")
+        cb = KiveMetricsCallback(eval_window=eval_window, use_mlflow=use_mlflow)
+        agent.learn(total_timesteps=total_timesteps, callback=cb)
+        episode_rewards = cb.episode_rewards
+        probe_counts = cb.probe_counts
+        fn_counts = cb.fn_counts
+        fp_counts = cb.fp_counts
+        traces = cb.traces
+    else:
+        print("RecurrentPPO unavailable. Cannot continue.")
+        return {}
 
-    for episode in range(n_episodes):
-        obs, info = env.reset()
-        done = False
-        ep_reward = 0.0
-        ep_probes = ep_fn = ep_fp = 0
-        ep_trace = {"true_label": info["true_label"], "beliefs": [], "actions": []}
+    actual_episodes = len(episode_rewards)
+    print(f"\nActual episodes completed: {actual_episodes}")
 
-        while not done:
-            if use_sb3:
-                action, _ = agent.predict(obs, deterministic=False)
-                action = int(action)
-            else:
-                action = _qtable_action(obs)
-
-            obs, reward, terminated, truncated, step_info = env.step(action)
-            done = terminated or truncated
-            ep_reward += reward
-
-            ep_trace["beliefs"].append(round(float(step_info["fraud_belief"]), 3))
-            ep_trace["actions"].append(step_info["action"])
-
-            if step_info["action"] == "PROBE":
-                ep_probes += 1
-            if terminated:
-                if step_info["action"] == "PASS" and step_info["true_label"] == "FRAUD":
-                    ep_fn += 1
-                elif step_info["action"] == "REJECT" and step_info["true_label"] == "REAL":
-                    ep_fp += 1
-
-        if use_sb3:
-            agent.learn(total_timesteps=0)  # SB3 learns from replay buffer internally
-
-        episode_rewards.append(ep_reward)
-        probe_counts.append(ep_probes)
-        fn_counts.append(ep_fn)
-        fp_counts.append(ep_fp)
-
-        # Collect traces for export (first 5 real, first 5 fraud across training)
-        if len(traces) < 10:
-            traces.append(ep_trace)
-
-        # Periodic evaluation + logging
-        if (episode + 1) % eval_window == 0:
-            w = episode_rewards[-eval_window:]
-            pn = probe_counts[-eval_window:]
-            fn_r = sum(fn_counts[-eval_window:]) / eval_window
-            fp_r = sum(fp_counts[-eval_window:]) / eval_window
-
-            metrics = {
-                "mean_reward": float(np.mean(w)),
-                "std_reward": float(np.std(w)),
-                "fn_rate": fn_r,
-                "fp_rate": fp_r,
-                "mean_probes": float(np.mean(pn)),
-            }
-
-            print(
-                f"Ep {episode+1:5d} | reward={metrics['mean_reward']:+.3f} "
-                f"| FN={metrics['fn_rate']:.3f} FP={metrics['fp_rate']:.3f} "
-                f"| probes={metrics['mean_probes']:.2f}"
-            )
-
-            if use_mlflow:
-                try:
-                    mlflow.log_metrics(metrics, step=episode + 1)
-                except Exception:
-                    pass
-
-    # --- Convergence report ---
-    final_w = 500
+    # ---- Convergence report ----
+    final_w = min(1000, actual_episodes)
     final_rewards = episode_rewards[-final_w:]
-    final_probes  = probe_counts[-final_w:]
-    fn_r_final = sum(fn_counts[-final_w:]) / final_w
-    fp_r_final = sum(fp_counts[-final_w:]) / final_w
+    final_probes = probe_counts[-final_w:]
+    fn_r_final = sum(fn_counts[-final_w:]) / max(final_w, 1)
+    fp_r_final = sum(fp_counts[-final_w:]) / max(final_w, 1)
 
     report = {
         "run_name": run_name,
-        "n_episodes": n_episodes,
+        "n_episodes_target": n_episodes,
+        "n_episodes_actual": actual_episodes,
         "final_mean_reward": round(float(np.mean(final_rewards)), 4),
+        "final_std_reward": round(float(np.std(final_rewards)), 4),
         "fn_rate": round(fn_r_final, 4),
         "fp_rate": round(fp_r_final, 4),
         "mean_probes_per_episode": round(float(np.mean(final_probes)), 3),
@@ -182,12 +222,48 @@ def train(
     report_path.write_text(json.dumps(report, indent=2))
     print(f"\nConvergence report: {report}")
 
-    # --- Plots ---
+    # ---- Export CSVs ----
+    csv_path = Path(output_dir) / "learning_curve.csv"
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["episode", "reward_mean", "reward_std", "fn_rate", "fp_rate", "probes_mean"])
+        for i in range(actual_episodes // eval_window):
+            idx = (i + 1) * eval_window
+            w = episode_rewards[max(0, idx - eval_window):idx]
+            fn_block = fn_counts[max(0, idx - eval_window):idx]
+            fp_block = fp_counts[max(0, idx - eval_window):idx]
+            pr_block = probe_counts[max(0, idx - eval_window):idx]
+            writer.writerow([
+                idx,
+                round(float(np.mean(w)), 4),
+                round(float(np.std(w)), 4),
+                round(sum(fn_block) / eval_window, 4),
+                round(sum(fp_block) / eval_window, 4),
+                round(float(np.mean(pr_block)), 2),
+            ])
+
+    traces_path = Path(output_dir) / "sample_traces.csv"
+    with open(traces_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["true_label", "n_probes", "actions", "final_action"])
+        for tr in traces:
+            acts = tr.get("actions", [])
+            n_probes = sum(1 for a in acts if a.startswith("PROBE_"))
+            writer.writerow([
+                tr.get("true_label"),
+                n_probes,
+                " -> ".join(acts),
+                acts[-1] if acts else "",
+            ])
+
+    # ---- Plots ----
     lc_path = _plot_learning_curve(episode_rewards, run_name, output_dir)
     tr_path = _plot_episode_traces(traces, output_dir)
 
+    # ---- MLflow finalize ----
     if use_mlflow:
         try:
+            import mlflow
             mlflow.log_artifact(str(report_path))
             mlflow.log_artifact(lc_path)
             mlflow.log_artifact(tr_path)
@@ -195,48 +271,38 @@ def train(
                 "final_mean_reward": report["final_mean_reward"],
                 "final_fn_rate": report["fn_rate"],
                 "final_fp_rate": report["fp_rate"],
+                "final_mean_probes": report["mean_probes_per_episode"],
                 "converged": float(report["converged"]),
             })
-            if use_sb3 and agent is not None:
-                agent.save(str(Path(output_dir) / "dqn_policy"))
+            if agent is not None:
+                agent.save(str(Path(output_dir) / "ppo_policy"))
             mlflow.end_run()
         except Exception as e:
-            print(f"MLflow artifact logging failed: {e}")
+            print(f"MLflow finalization failed: {e}")
 
     print(f"\nTraining complete. Outputs in {output_dir}/")
+    if report["converged"]:
+        print("All convergence criteria MET.")
+    else:
+        print("Convergence criteria NOT met. Review reward function or hyperparameters.")
     return report
-
-
-def _qtable_action(obs: np.ndarray) -> int:
-    """Simple heuristic fallback when SB3 is not available."""
-    belief, confidence = float(obs[0]), float(obs[1])
-    evidence_count = float(obs[5]) * 5  # denormalize
-
-    if evidence_count >= 5:
-        return 2  # FLAG
-    if belief < 0.25 and confidence > 0.6:
-        return 0  # PASS
-    if belief > 0.75 and confidence > 0.6:
-        return 1  # REJECT
-    if 0.4 <= belief <= 0.6 or confidence < 0.5:
-        return 3  # PROBE
-    if belief > 0.6:
-        return 1
-    return 0
 
 
 def _plot_learning_curve(rewards: list, title: str, output_dir: str) -> str:
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-    fig.suptitle(f"KIVE RL Training — {title}", fontsize=12, fontweight="bold")
+    fig.suptitle(f"KIVE RL Training -- {title}", fontsize=12, fontweight="bold")
 
     episodes = np.arange(1, len(rewards) + 1)
     arr = np.array(rewards)
-    window = min(100, len(arr) // 5)
+    window = min(100, max(len(arr) // 10, 1))
     rolling = np.convolve(arr, np.ones(window) / window, mode="valid")
 
     ax = axes[0]
     ax.plot(episodes, arr, alpha=0.15, color="#4C9BE8", linewidth=0.5, label="Episode reward")
-    ax.plot(episodes[window - 1:], rolling, color="#E84C4C", linewidth=2, label=f"Rolling mean (n={window})")
+    ax.plot(
+        episodes[window - 1:], rolling,
+        color="#E84C4C", linewidth=2, label=f"Rolling mean (n={window})",
+    )
     ax.axhline(0.5, color="#888", linestyle="--", linewidth=1, label="Convergence threshold")
     ax.set_xlabel("Episode")
     ax.set_ylabel("Cumulative Reward")
@@ -250,7 +316,7 @@ def _plot_learning_curve(rewards: list, title: str, output_dir: str) -> str:
     ax2.axvline(np.mean(final), color="#E84C4C", linewidth=2, label=f"Mean: {np.mean(final):.2f}")
     ax2.set_xlabel("Episode Reward")
     ax2.set_ylabel("Count")
-    ax2.set_title(f"Final {len(final)} Episodes — Reward Distribution")
+    ax2.set_title(f"Final {len(final)} Episodes -- Reward Distribution")
     ax2.legend(fontsize=8)
     ax2.grid(True, alpha=0.3)
 
@@ -275,7 +341,7 @@ def _plot_episode_traces(traces: list, output_dir: str) -> str:
     elif rows == 1:
         axes = [axes]
 
-    fig.suptitle("Episode Traces — Belief Trajectory + Action Sequence", fontsize=11)
+    fig.suptitle("Episode Traces -- Belief Trajectory + Action Sequence", fontsize=11)
 
     for idx, trace in enumerate(traces):
         r, c = divmod(idx, cols)
@@ -289,15 +355,18 @@ def _plot_episode_traces(traces: list, output_dir: str) -> str:
         ax.plot(steps, beliefs, "o-", color=color, linewidth=2, markersize=5)
         ax.axhline(0.75, color="#E84C4C", linestyle=":", linewidth=0.8, alpha=0.6)
         ax.axhline(0.25, color="#4CE87C", linestyle=":", linewidth=0.8, alpha=0.6)
-        ax.axhline(0.5,  color="#888",    linestyle="--", linewidth=0.8, alpha=0.5)
+        ax.axhline(0.5, color="#888", linestyle="--", linewidth=0.8, alpha=0.5)
         final_action = actions[-1] if actions else "?"
-        ax.set_title(f"{label} → {final_action}", fontsize=9, color=color, fontweight="bold")
+        n_probes = sum(1 for a in actions if a.startswith("PROBE_"))
+        ax.set_title(
+            f"{label} -> {final_action} ({n_probes}p)",
+            fontsize=8, color=color, fontweight="bold",
+        )
         ax.set_ylim(-0.05, 1.05)
         ax.set_xlabel("Step", fontsize=7)
         ax.set_ylabel("Fraud Belief", fontsize=7)
         ax.tick_params(labelsize=7)
 
-    # Hide unused subplots
     for idx in range(n, rows * cols):
         r, c = divmod(idx, cols)
         if rows > 1:
@@ -316,9 +385,9 @@ def _plot_episode_traces(traces: list, output_dir: str) -> str:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train KIVE RL agent")
     parser.add_argument("--profiles", default="data/synthetic_profiles.json")
-    parser.add_argument("--n-episodes", type=int, default=3000)
+    parser.add_argument("--n-episodes", type=int, default=5000)
     parser.add_argument("--eval-window", type=int, default=100)
-    parser.add_argument("--run-name", default="kive_dqn_v1")
+    parser.add_argument("--run-name", default="kive_ppo_v2")
     parser.add_argument("--output-dir", default="artifacts/training")
     parser.add_argument("--no-mlflow", action="store_true")
     args = parser.parse_args()
@@ -332,7 +401,7 @@ if __name__ == "__main__":
         use_mlflow=not args.no_mlflow,
     )
 
-    if report["converged"]:
+    if report.get("converged"):
         print("\nAll convergence criteria MET. Ready to submit.")
     else:
         print("\nConvergence criteria NOT met. Debug reward function or training params.")

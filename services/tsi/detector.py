@@ -83,11 +83,38 @@ class TSIDetector:
 
         if zero_variance and n_roles >= 3:
             fraud_score += 0.25
-            reasons.append(f"seniority delta variance {np.var(deltas):.3f} — perfectly uniform progression")
+            reasons.append(f"seniority delta variance {np.var(deltas):.3f} -- perfectly uniform progression")
 
         if no_gaps and span_years > 7:
             fraud_score += 0.15
             reasons.append(f"no employment gaps over {span_years:.0f}-year career")
+
+        # --- Tenure implausibility (NEW) ---
+        # VP/Director after < 5 years total experience = suspicious
+        max_seniority = max(seniority_levels) if seniority_levels else 0
+        if max_seniority >= 7 and span_years < 5:  # VP-level in under 5 years
+            fraud_score += 0.20
+            reasons.append(
+                f"reached seniority level {max_seniority} (VP/C-level) "
+                f"in only {span_years:.0f} years total career span"
+            )
+        elif max_seniority >= 5 and span_years < 3:  # Principal in under 3 years
+            fraud_score += 0.15
+            reasons.append(
+                f"reached seniority level {max_seniority} (Principal/Architect) "
+                f"in only {span_years:.0f} years total career span"
+            )
+
+        # --- Fast-climb churn (NEW) ---
+        # Average tenure < 1.5 years across 4+ roles = improbable
+        if n_roles >= 4 and span_years > 0:
+            avg_tenure = span_years / n_roles
+            if avg_tenure < 1.5:
+                fraud_score += 0.15
+                reasons.append(
+                    f"average tenure {avg_tenure:.1f}y across {n_roles} roles "
+                    f"-- improbably short for claimed progression"
+                )
 
         fraud_score = float(np.clip(fraud_score, 0.0, 1.0))
         confidence = 0.40 + min(n_roles * 0.05, 0.30)

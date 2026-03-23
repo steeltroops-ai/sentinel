@@ -70,6 +70,36 @@ def validate(profiles_path: str) -> dict:
         "passed": (tsi_fraud_smooth - tsi_real_smooth) >= 0.20,
     }
 
+    # ── LQA: fraud profiles have AI phrasing artifacts ──
+    artifact_pattern = re.compile(r"(It is important to note that|Certainly!|In most cases|depends on the context|As an AI)", re.IGNORECASE)
+    lqa_real_art = _pattern_presence_rate(real, artifact_pattern)
+    lqa_fraud_art = _pattern_presence_rate(fraud, artifact_pattern)
+    results["checks"]["lqa_separability"] = {
+        "real_artifact_presence": round(lqa_real_art, 3),
+        "fraud_artifact_presence": round(lqa_fraud_art, 3),
+        "gap": round(lqa_fraud_art - lqa_real_art, 3),
+        "passed": (lqa_fraud_art - lqa_real_art) >= 0.40,
+    }
+
+    # ── BES: fraud profiles show pasted telemetry ──
+    bes_real_paste = _telemetry_paste_rate(real)
+    bes_fraud_paste = _telemetry_paste_rate(fraud)
+    results["checks"]["bes_separability"] = {
+        "real_paste_rate": round(bes_real_paste, 3),
+        "fraud_paste_rate": round(bes_fraud_paste, 3),
+        "gap": round(bes_fraud_paste - bes_real_paste, 3),
+        "passed": (bes_fraud_paste - bes_real_paste) >= 0.40,
+    }
+
+    # ── RSL: latency slope variance (real experts are slower, fraud is uniform) ──
+    rsl_real_mean = _mean_latency(real)
+    rsl_fraud_mean = _mean_latency(fraud)
+    results["checks"]["rsl_separability"] = {
+        "real_mean_latency_ms": round(rsl_real_mean, 3),
+        "fraud_mean_latency_ms": round(rsl_fraud_mean, 3),
+        "passed": rsl_real_mean > rsl_fraud_mean + 2000, 
+    }
+
     # ── Response count sanity ──
     real_with_responses  = sum(1 for p in real  if p.screening_responses)
     fraud_with_responses = sum(1 for p in fraud if p.screening_responses)
@@ -149,6 +179,25 @@ def _smooth_career_rate(profiles: list[ExpertProfile]) -> float:
         if all(d >= 0 for d in deltas):
             smooth += 1
     return smooth / max(len(profiles), 1)
+
+
+def _telemetry_paste_rate(profiles: list[ExpertProfile]) -> float:
+    """Fraction of profiles exhibiting heavy paste behaviors."""
+    suspicious = 0
+    for p in profiles:
+        bt = p.behavioral_telemetry
+        if not bt:
+            continue
+        if len(bt.get("paste_events", [])) > 0:
+            suspicious += 1
+    return suspicious / max(len(profiles), 1)
+
+def _mean_latency(profiles: list[ExpertProfile]) -> float:
+    latencies = []
+    for p in profiles:
+        for r in p.screening_responses:
+            latencies.append(r.latency_ms)
+    return sum(latencies) / len(latencies) if latencies else 0.0
 
 
 def _print_report(results: dict):

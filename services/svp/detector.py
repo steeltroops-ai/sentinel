@@ -54,6 +54,22 @@ _NUMERIC_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# Opinionated language markers -- real experts have preferences and take sides
+_OPINION_PATTERNS = [
+    re.compile(r"\b(I prefer|I always use|I never use|I stopped using|my go-to|in my experience)\b", re.IGNORECASE),
+    re.compile(r"\b(better than|worse than|overrated|underrated|honestly|frankly|unpopular opinion)\b", re.IGNORECASE),
+    re.compile(r"\b(I disagree|I don't think|I wouldn't recommend|avoid using|we switched from)\b", re.IGNORECASE),
+    re.compile(r"\b(the problem with|the downside of|the tradeoff is|not great for|overkill for)\b", re.IGNORECASE),
+]
+
+# Hedging phrases -- GPT over-hedges on factual questions
+_HEDGING_PATTERNS = re.compile(
+    r"\b(it depends|generally speaking|in most cases|it's worth noting|one could argue|"
+    r"there are various|it is important to|when it comes to|one of the key|broadly speaking|"
+    r"typically|arguably|essentially|fundamentally|it varies)\b",
+    re.IGNORECASE,
+)
+
 
 @dataclass
 class SVPResult:
@@ -204,8 +220,38 @@ class SVPDetector:
         numeric_hits = len(_NUMERIC_PATTERN.findall(text))
         numeric_density = min(numeric_hits / (n_words / 30), 1.0)
 
-        # Weighted composite
-        score = 0.35 * ner_density + 0.40 * tech_density + 0.25 * numeric_density
+        # 4. Proper noun density (NEW) -- real experts name specific things
+        proper_noun_density = 0.0
+        if self._nlp:
+            try:
+                doc = self._nlp(text[:1000])
+                # Count PROPN tokens excluding sentence-initial position
+                proper_nouns = sum(
+                    1 for token in doc
+                    if token.pos_ == "PROPN" and token.i > 0
+                    and doc[token.i - 1].text != "."
+                )
+                proper_noun_density = min(proper_nouns / (n_words / 15), 1.0)
+            except Exception:
+                pass
+
+        # 5. Opinionated language score (NEW) -- real experts take positions
+        opinion_hits = sum(1 for p in _OPINION_PATTERNS if p.search(text))
+        opinion_score = min(opinion_hits / 2.0, 1.0)  # 2+ opinion markers = max
+
+        # 6. Hedging density (NEW) -- GPT over-hedges; inverse signal
+        hedging_hits = len(_HEDGING_PATTERNS.findall(text))
+        hedging_penalty = min(hedging_hits / (n_words / 50), 1.0)  # high hedging = low specificity
+
+        # Weighted composite: original 3 signals + 3 new signals
+        score = (
+            0.20 * ner_density +
+            0.25 * tech_density +
+            0.15 * numeric_density +
+            0.15 * proper_noun_density +
+            0.15 * opinion_score +
+            0.10 * (1.0 - hedging_penalty)  # invert: less hedging = more specificity
+        )
         return float(np.clip(score, 0.0, 1.0))
 
     def _infer_domain(self, topic: str) -> str:

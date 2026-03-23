@@ -42,7 +42,6 @@ TECH_TIMELINE_SEED: list[tuple] = [
     ("terraform",     2014, 2018, "Hashicorp product; enterprise 2018"),
     ("ansible",       2012, 2016, "Red Hat acquisition 2015; mainstream 2016"),
     ("llm",           2022, 2023, "ChatGPT inflection Nov 2022"),
-    ("langchain",     2022, 2023, "Harrison Chase, Jan 2023; mainstream mid-2023"),
     ("huggingface",   2018, 2021, "Transformers library Oct 2019; mainstream 2021"),
     ("mlflow",        2018, 2021, "Databricks; mainstream MLOps 2021"),
     ("zenml",         2021, 2023, "Early adoption 2022-2023"),
@@ -53,7 +52,38 @@ TECH_TIMELINE_SEED: list[tuple] = [
     ("aws",           2006, 2012, "S3/EC2 2006; enterprise inflection 2012"),
     ("gcp",           2008, 2016, "App Engine 2008; enterprise 2016"),
     ("azure",         2010, 2015, "Microsoft 2010; enterprise 2015"),
+    ("rag",           2023, 2024, "Retrieval-Augmented Generation; mainstream mid-2023"),
+    ("dbt",           2016, 2020, "Analytics engineering; inflection 2020"),
+    ("prefect",       2018, 2022, "Airflow alternative; mainstream 2022"),
+    ("ray",           2017, 2022, "Distributed compute; mainstream 2022"),
+    ("polars",        2021, 2023, "Rust-based DataFrame; mainstream 2023"),
 ]
+
+# Version release dates — for version-era plausibility checks
+# Maps (tool, major_version) -> release_year
+VERSION_RELEASE_DATES: dict[tuple[str, str], int] = {
+    ("kubernetes", "1.18"): 2020, ("kubernetes", "1.20"): 2020,
+    ("kubernetes", "1.24"): 2022, ("kubernetes", "1.28"): 2023,
+    ("pytorch", "1.0"): 2018, ("pytorch", "1.9"): 2021,
+    ("pytorch", "2.0"): 2023,
+    ("tensorflow", "2.0"): 2019, ("tensorflow", "2.10"): 2022,
+    ("react", "16"): 2017, ("react", "17"): 2020, ("react", "18"): 2022,
+    ("python", "3.8"): 2019, ("python", "3.10"): 2021, ("python", "3.11"): 2022,
+    ("python", "3.12"): 2023,
+    ("node", "14"): 2020, ("node", "16"): 2021, ("node", "18"): 2022,
+    ("docker", "20"): 2020, ("docker", "24"): 2023,
+    ("fastapi", "0.100"): 2023,
+    ("pandas", "1.0"): 2020, ("pandas", "2.0"): 2023,
+    ("spark", "3.0"): 2020, ("spark", "3.4"): 2023,
+}
+
+# Regex to detect version references in screening answers
+_VERSION_PATTERN = re.compile(
+    r"\b(kubernetes|k8s|pytorch|tensorflow|react|python|node|docker|fastapi|"
+    r"pandas|spark|vue|angular|go|redis)\s*"
+    r"v?(\d+\.\d+(?:\.\d+)?)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -111,6 +141,7 @@ class TAVDetector:
 
         employment_history = request.profile.get("employment_history", [])
         skill_timestamps = request.profile.get("skill_timestamps", {})
+        screening_responses = request.screening_responses or []
 
         # Estimate career start year
         career_start = self._infer_career_start(employment_history)
@@ -119,6 +150,7 @@ class TAVDetector:
         pre_inflection_hits: list[str] = []
         max_score = 0.0
 
+        # --- Layer 1: Duration violations (existing logic) ---
         for tool, claim_date_str in skill_timestamps.items():
             tool_key = tool.lower().strip()
             if tool_key not in self._timeline:
@@ -128,7 +160,6 @@ class TAVDetector:
             release_year = timeline["release_year"]
             inflection_year = timeline["inflection_year"]
 
-            # Infer claimed experience years from claim date
             claim_year = self._parse_year(claim_date_str)
             if claim_year is None:
                 continue
@@ -136,7 +167,6 @@ class TAVDetector:
             claimed_years = CURRENT_YEAR - claim_year
             max_possible = CURRENT_YEAR - release_year
 
-            # Primary: duration violation
             if claimed_years > 0 and max_possible > 0:
                 ratio = claimed_years / max_possible
                 if ratio > 0.95:
@@ -159,7 +189,6 @@ class TAVDetector:
                         },
                     ))
 
-                # Secondary: pre-inflection expert claim
                 elif claim_year <= inflection_year and claimed_years >= 3:
                     pre_inflection_hits.append(tool)
                     if max_score < 0.45:
@@ -179,12 +208,21 @@ class TAVDetector:
                         },
                     ))
 
+        # --- Layer 2: Version-era plausibility (NEW) ---
+        # Scan screening answers for version references and cross-check against
+        # employment dates.  e.g. mentioning "K8s 1.28" during a role ending in 2020
+        # is a hard violation because 1.28 shipped in Aug 2023.
+        version_violations = self._check_version_era(
+            screening_responses, employment_history
+        )
+        for v in version_violations:
+            violations.append(v)
+            max_score = max(max_score, 0.70)
+
         if not violations:
             return TAVResult(score=0.05, confidence=0.80)
 
-        # Confidence scales with number of corroborating violations
         confidence = min(0.50 + len(violations) * 0.15, 0.95)
-
         probe = self._build_probe(violations, pre_inflection_hits)
 
         return TAVResult(
@@ -192,7 +230,7 @@ class TAVDetector:
             confidence=round(confidence, 3),
             flags=violations,
             probe_suggestion=probe,
-            needs_probe=max_score < 0.75,  # Ambiguous — probe before terminal decision
+            needs_probe=max_score < 0.75,
         )
 
     def _infer_career_start(self, employment_history: list[dict]) -> int:
@@ -205,11 +243,90 @@ class TAVDetector:
         match = re.search(r"\b(19|20)\d{2}\b", str(date_str))
         return int(match.group()) if match else None
 
+    def _check_version_era(
+        self,
+        responses: list,
+        employment_history: list[dict],
+    ) -> list[FlagDetail]:
+        """Scan answers for version references that didn't exist during claimed roles."""
+        flags = []
+        if not responses:
+            return flags
+
+        # Build a map of role date ranges
+        role_ranges: list[tuple[int, int]] = []
+        for role in employment_history:
+            start = role.get("start_year", 0)
+            end = role.get("end_year") or CURRENT_YEAR
+            role_ranges.append((start, end))
+
+        all_text = " ".join(r.answer for r in responses if r.answer)
+        for match in _VERSION_PATTERN.finditer(all_text):
+            tool = match.group(1).lower()
+            version = match.group(2)
+
+            # Normalize tool name
+            if tool == "k8s":
+                tool = "kubernetes"
+
+            # Look up version release year
+            release_year = None
+            # Try exact match first, then major.minor
+            for key_version in [version, version.split(".")[0]]:
+                if (tool, key_version) in VERSION_RELEASE_DATES:
+                    release_year = VERSION_RELEASE_DATES[(tool, key_version)]
+                    break
+
+            if release_year is None:
+                continue
+
+            # Check if any role ended before this version existed
+            for start, end in role_ranges:
+                if end < release_year and tool in " ".join(
+                    str(r.get("skills", [])) for r in employment_history
+                ).lower():
+                    flags.append(FlagDetail(
+                        type="version_era_violation",
+                        description=(
+                            f"References {tool.title()} v{version} (released {release_year}) "
+                            f"but associated role ended in {end}. "
+                            f"Version did not exist during claimed usage period."
+                        ),
+                        severity="high",
+                        evidence={
+                            "tool": tool,
+                            "version": version,
+                            "version_release_year": release_year,
+                            "role_end_year": end,
+                        },
+                    ))
+                    break  # One flag per version mention is sufficient
+
+        return flags
+
     def _build_probe(
         self,
         violations: list[FlagDetail],
         pre_inflection: list[str],
     ) -> ProbeSuggestion:
+        # Prioritize version-era violations for precision probing
+        version_v = [v for v in violations if v.type == "version_era_violation"]
+        if version_v:
+            tool = version_v[0].evidence.get("tool", "this technology")
+            version = version_v[0].evidence.get("version", "")
+            return ProbeSuggestion(
+                question=(
+                    f"You mentioned {tool} v{version}. Walk me through a breaking change "
+                    f"introduced in that specific version and how you handled the migration."
+                ),
+                target_dimension="TAV",
+                expected_fraud_response_pattern=(
+                    "Generic answer about the tool without version-specific migration "
+                    "details. Likely describes current-version behavior, not the actual "
+                    "release differences."
+                ),
+            )
+
         if violations and violations[0].type == "temporal_violation_hard":
             tool = violations[0].evidence.get("tool", "this technology")
             return ProbeSuggestion(

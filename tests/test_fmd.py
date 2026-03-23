@@ -95,3 +95,49 @@ async def test_fmd_probe_generated_when_no_failure_memory():
     assert result.pattern_matches == 0
     assert result.score >= 0.55, f"Expected high fraud score with no failure patterns, got {result.score}"
 
+
+@pytest.mark.asyncio
+async def test_fmd_workaround_vocabulary():
+    """Using workaround vocabulary like 'we had to' or 'monkey-patch' should trigger FMD."""
+    from services.fmd.detector import FMDDetector
+    from kive.shared.schemas import SignalRequest, ScreeningResponse
+    detector = FMDDetector()
+    await detector.initialize()
+
+    req = SignalRequest(
+        candidate_id="test-fmd-workaround",
+        profile={"employment_history": [], "skill_timestamps": {}, "education": []},
+        screening_responses=[
+            ScreeningResponse(
+                question_id="q1",
+                answer="The API was rate-limiting us, so we had to build a workaround. The temporary fix involved a duct tape solution.",
+                latency_ms=3000,
+            )
+        ],
+    )
+    result = await detector.analyze(req)
+    assert result.pattern_matches >= 1
+    assert result.score >= 0.30
+
+
+@pytest.mark.asyncio
+async def test_fmd_deprecation_memory():
+    """Referencing deprecated tech and migrations should trigger FMD."""
+    from services.fmd.detector import FMDDetector
+    from kive.shared.schemas import SignalRequest, ScreeningResponse
+    detector = FMDDetector()
+    await detector.initialize()
+
+    req = SignalRequest(
+        candidate_id="test-fmd-deprecation",
+        profile={"employment_history": [], "skill_timestamps": {}, "education": []},
+        screening_responses=[
+            ScreeningResponse(
+                question_id="q1",
+                answer="We had to update our system because the old package was deprecated and the upgrade path required a lot of migration.",
+                latency_ms=3000,
+            )
+        ],
+    )
+    result = await detector.analyze(req)
+    assert result.pattern_matches >= 1

@@ -52,6 +52,26 @@ _FAILURE_PATTERNS = [
         r"\b(bug|issue|problem|broke|crash|fail|memory|leak|deadlock|silent|dropped|wrong)\b",
         re.IGNORECASE | re.DOTALL,
     ),
+    # Workaround vocabulary (NEW) -- real engineers describe tactical fixes
+    re.compile(
+        r"\b(we had to|the only way|worked around|workaround|hack|bandaid|temporary fix|"
+        r"monkey-?patch|hot-?fix|quick fix|duct tape|the trick was|turns out)\b",
+        re.IGNORECASE,
+    ),
+    # Deprecation & migration memory (NEW) -- real practitioners track EOL dates
+    re.compile(
+        r"\b(deprecated|end.of.life|EOL|sunset|breaking change|backward.?compat|"
+        r"migration.?guide|upgrade.?path|they removed|they changed|no longer supported)\b"
+        r".{0,100}"
+        r"\b(v\d|version|sdk|api|library|package|\d+\.\d+|update|upgrade|migrate)\b",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    # Incident timestamp references (NEW) -- real engineers remember industry events
+    re.compile(
+        r"\b(log4shell|log4j|fastly outage|solarwinds|heartbleed|spectre|meltdown|"
+        r"left-?pad|npm audit|equifax|cloudflare)\b",
+        re.IGNORECASE,
+    ),
 ]
 
 # Curated failure narrative embedding anchors (text similarity targets)

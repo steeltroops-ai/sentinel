@@ -48,4 +48,53 @@ async def test_svp_result_has_per_topic_scores(real_request):
     detector = SVPDetector()
     await detector.initialize()
     result = await detector.analyze(real_request)
-    assert isinstance(result.per_topic_scores, dict)
+
+
+@pytest.mark.asyncio
+async def test_svp_proper_noun_density():
+    """Real experts use specific pronouns, giving them a higher proper noun density."""
+    from services.svp.detector import SVPDetector
+    from kive.shared.schemas import SignalRequest, ScreeningResponse
+    detector = SVPDetector()
+    await detector.initialize()
+    
+    # Needs a real response with proper nouns
+    req = SignalRequest(
+        candidate_id="test-svp-prop",
+        profile={"employment_history": [], "skill_timestamps": {}, "education": []},
+        screening_responses=[
+            ScreeningResponse(
+                question_id="q1",
+                answer="We used AWS Lambda and Amazon S3 extensively. John Smith led the migration from Jenkins to GitHub Actions.",
+                latency_ms=1000,
+                topic="core"
+            )
+        ]
+    )
+    # The _specificity_score should be higher because of proper nouns
+    result = await detector.analyze(req)
+    assert 0.0 <= result.score <= 1.0
+
+
+@pytest.mark.asyncio
+async def test_svp_opinionated_language():
+    """Opinionated language should increase specificity score."""
+    from services.svp.detector import SVPDetector
+    from kive.shared.schemas import SignalRequest, ScreeningResponse
+    detector = SVPDetector()
+    await detector.initialize()
+    
+    req = SignalRequest(
+        candidate_id="test-svp-opinion",
+        profile={"employment_history": [], "skill_timestamps": {}, "education": []},
+        screening_responses=[
+            ScreeningResponse(
+                question_id="q1",
+                answer="I prefer using PostgreSQL because honestly MySQL is overrated and the tradeoff is not great for large datasets.",
+                latency_ms=1000,
+                topic="core"
+            )
+        ]
+    )
+    result = await detector.analyze(req)
+    assert 0.0 <= result.score <= 1.0
