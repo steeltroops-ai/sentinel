@@ -39,11 +39,6 @@ data/validation_profiles.json
 mlruns/
 mlartifacts/
 
-# Training artifacts (generated — checked in manually for submission)
-artifacts/training/*.png
-artifacts/training/*.json
-artifacts/training/*.zip
-
 # Jupyter
 .ipynb_checkpoints/
 *.nbconvert.*
