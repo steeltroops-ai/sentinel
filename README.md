@@ -65,12 +65,12 @@ See [COMMANDS.md](COMMANDS.md) for complete command reference.
 
 ## Results
 
-Latest training (kive_ppo_full - 17041 episodes):
-- FN rate: 0.022 (target: <0.05) [PASS]
-- FP rate: 0.012 (target: <0.08) [PASS]
-- Mean probes: 3.78 (adaptive strategy)
-- Probe variance: 0.34 (context-dependent)
-- Mean reward: 1.04 (near-optimal)
+Latest training (kive_ppo_full - 17394 episodes):
+- FN rate: 0.001 (target: <0.05) [PASS]
+- FP rate: 0.003 (target: <0.08) [PASS]
+- Mean probes: 3.56 (adaptive strategy)
+- Probe variance: 0.45 (context-dependent)
+- Mean reward: 1.11 (near-optimal)
 - Converged: true [PASS]
 
 ![Learning Curve](docs/learning_curve.png)
