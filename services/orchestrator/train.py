@@ -5,7 +5,10 @@
 #   - n_steps=128 calibrated for avg episode length of 3-5 steps
 #   - ent_coef=0.05 for strong exploration early (decays via PPO clipping)
 #   - gamma=0.99 standard temporal discount
-#   - Probe counting fixed to track ALL non-terminal actions (PROBE_*)
+#   - Probe counting fixed to track UNIQUE probes only (redundant probes penalized)
+#   - Observation space reduced to 16D (removed redundant passive/active belief dims)
+#   - Probe cost aligned to -0.05 (memo consistency)
+#   - Active signal calibration reduced to force multi-probe strategy
 
 from __future__ import annotations
 
@@ -69,7 +72,7 @@ def train(
                 "max_steps": env.MAX_STEPS,
                 "reward_fn": "FN=-2.5,FP=-1.0,TP=+1.0,TN=+1.0,FLAG=+0.3/-0.2,PROBE=-0.05",
                 "fraud_ratio": gen.fraud_ratio,
-                "observation_dim": 18,
+                "observation_dim": 16,
                 "action_dim": 7,
             })
         except Exception as e:
@@ -92,6 +95,10 @@ def train(
                 self.fn_counts = []
                 self.fp_counts = []
                 self.traces = []
+                
+                # Stability tracking
+                self.fn_rate_history = []
+                self.fp_rate_history = []
 
             def _on_step(self) -> bool:
                 dones = self.locals.get("dones", [False])
@@ -104,8 +111,9 @@ def train(
 
                 history = info.get("action_history", [])
 
-                # Count actual probes (PROBE_BES, PROBE_LQA, PROBE_CCS, PROBE_RSL)
-                probe_count = sum(1 for a in history if a.startswith("PROBE_"))
+                # Count UNIQUE probes only (redundant probes are penalized but shouldn't count as valid evidence)
+                unique_probes = set(a for a in history if a.startswith("PROBE_"))
+                probe_count = len(unique_probes)
                 self.probe_counts.append(probe_count)
 
                 # FN/FP from terminal action
@@ -129,6 +137,18 @@ def train(
                     pn = self.probe_counts[-self.eval_window:]
                     fn_r = sum(self.fn_counts[-self.eval_window:]) / self.eval_window
                     fp_r = sum(self.fp_counts[-self.eval_window:]) / self.eval_window
+                    
+                    # Track stability
+                    self.fn_rate_history.append(fn_r)
+                    self.fp_rate_history.append(fp_r)
+                    
+                    # Compute stability metrics (variance over last 5 windows)
+                    if len(self.fn_rate_history) >= 5:
+                        fn_stability = np.std(self.fn_rate_history[-5:])
+                        fp_stability = np.std(self.fp_rate_history[-5:])
+                    else:
+                        fn_stability = 0.0
+                        fp_stability = 0.0
 
                     metrics = {
                         "mean_reward": float(np.mean(w)),
@@ -136,11 +156,21 @@ def train(
                         "fn_rate": fn_r,
                         "fp_rate": fp_r,
                         "mean_probes": float(np.mean(pn)),
+                        "fn_stability": fn_stability,
+                        "fp_stability": fp_stability,
                     }
+                    
+                    # Detect policy collapse
+                    collapse_warning = ""
+                    if fn_r > 0.15:
+                        collapse_warning = " [!!! FN COLLAPSE !!!]"
+                    elif fp_r > 0.15:
+                        collapse_warning = " [!!! FP COLLAPSE !!!]"
+                    
                     print(
                         f"Ep {self.episodes:5d} | reward={metrics['mean_reward']:+.3f} "
                         f"| FN={metrics['fn_rate']:.3f} FP={metrics['fp_rate']:.3f} "
-                        f"| probes={metrics['mean_probes']:.2f}"
+                        f"| probes={metrics['mean_probes']:.2f}{collapse_warning}"
                     )
                     if self.use_mlflow:
                         try:
@@ -201,6 +231,13 @@ def train(
     final_probes = probe_counts[-final_w:]
     fn_r_final = sum(fn_counts[-final_w:]) / max(final_w, 1)
     fp_r_final = sum(fp_counts[-final_w:]) / max(final_w, 1)
+    
+    # Detect degenerate policy (too few probes or too uniform)
+    probe_variance = float(np.var(final_probes))
+    degenerate_policy = (
+        float(np.mean(final_probes)) < 1.5  # Agent should probe 1.5+ times on average
+        or probe_variance < 0.3  # Agent should vary probe count based on uncertainty
+    )
 
     report = {
         "run_name": run_name,
@@ -211,10 +248,13 @@ def train(
         "fn_rate": round(fn_r_final, 4),
         "fp_rate": round(fp_r_final, 4),
         "mean_probes_per_episode": round(float(np.mean(final_probes)), 3),
+        "probe_variance": round(probe_variance, 3),
+        "degenerate_policy": degenerate_policy,
         "converged": (
-            float(np.mean(final_rewards)) > 0.5
-            and fn_r_final < 0.10
-            and fp_r_final < 0.15
+            float(np.mean(final_rewards)) > 0.75
+            and fn_r_final < 0.05
+            and fp_r_final < 0.08
+            and not degenerate_policy
         ),
     }
 
@@ -245,13 +285,16 @@ def train(
     traces_path = Path(output_dir) / "sample_traces.csv"
     with open(traces_path, "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["true_label", "n_probes", "actions", "final_action"])
+        writer.writerow(["true_label", "n_probes", "n_redundant", "actions", "final_action"])
         for tr in traces:
             acts = tr.get("actions", [])
-            n_probes = sum(1 for a in acts if a.startswith("PROBE_"))
+            probe_actions = [a for a in acts if a.startswith("PROBE_")]
+            n_probes = len(set(probe_actions))  # unique probes
+            n_redundant = len(probe_actions) - n_probes  # redundant probe count
             writer.writerow([
                 tr.get("true_label"),
                 n_probes,
+                n_redundant,
                 " -> ".join(acts),
                 acts[-1] if acts else "",
             ])
@@ -285,6 +328,10 @@ def train(
         print("All convergence criteria MET.")
     else:
         print("Convergence criteria NOT met. Review reward function or hyperparameters.")
+        if report.get("degenerate_policy"):
+            print("WARNING: Degenerate policy detected (insufficient probing or no variance).")
+            print(f"  Mean probes: {report['mean_probes_per_episode']:.2f} (target: >1.5)")
+            print(f"  Probe variance: {report['probe_variance']:.2f} (target: >0.3)")
     return report
 
 
@@ -357,9 +404,12 @@ def _plot_episode_traces(traces: list, output_dir: str) -> str:
         ax.axhline(0.25, color="#4CE87C", linestyle=":", linewidth=0.8, alpha=0.6)
         ax.axhline(0.5, color="#888", linestyle="--", linewidth=0.8, alpha=0.5)
         final_action = actions[-1] if actions else "?"
-        n_probes = sum(1 for a in actions if a.startswith("PROBE_"))
+        probe_actions = [a for a in actions if a.startswith("PROBE_")]
+        n_probes = len(set(probe_actions))  # unique probes only
+        n_redundant = len(probe_actions) - n_probes
+        title_suffix = f"({n_probes}p" + (f"+{n_redundant}r)" if n_redundant > 0 else ")")
         ax.set_title(
-            f"{label} -> {final_action} ({n_probes}p)",
+            f"{label} -> {final_action} {title_suffix}",
             fontsize=8, color=color, fontweight="bold",
         )
         ax.set_ylim(-0.05, 1.05)

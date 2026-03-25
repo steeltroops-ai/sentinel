@@ -1,6 +1,19 @@
 # KIVE System Architecture
+**Technical Implementation | Production-Grade Fraud Detection**
 
-## 1. High-Level Pipeline
+---
+
+## The Architecture Problem
+
+Most fraud detection systems are monoliths. They couple signal logic to orchestration logic to deployment infrastructure. When one signal needs retraining, you redeploy everything. When a client wants only temporal anchoring verification, they cannot adopt it without the full stack.
+
+This architecture solves that. Nine independent microservices. One orchestrator. Each signal is a standalone REST API with its own detector class, health endpoint, and Docker container. Any organization can run TAV or FMD in isolation. The orchestrator coordinates them but does not depend on them existing.
+
+The POMDP formulation is not academic posturing. It is the only correct way to model this problem. You do not have full information at step zero. You acquire it sequentially by probing. The agent learns which probes reduce uncertainty fastest and when to stop collecting evidence.
+
+---
+
+## High-Level Pipeline
 
 ```mermaid
 graph TD
@@ -57,9 +70,9 @@ graph TD
 
 ---
 
-## 2. Signal Detection Matrix
+## Signal Detection Matrix
 
-The core architecture runs on 9 distinct microservices handling isolated vector queries. Each returns a normalized fraud probability score `[0, 1]` coupled with internal confidence logic.
+Each signal is an independent FastAPI service returning fraud probability in [0,1]. The weights are not arbitrary. They reflect information density per compute cost. TAV has the highest weight because temporal violations are binary and unfakeable. BES has lower weight because behavioral entropy requires more samples to converge.
 
 | Signal | Execution | Weight | Core Focus |
 |--------|-----------|--------|------------|
@@ -75,7 +88,9 @@ The core architecture runs on 9 distinct microservices handling isolated vector 
 
 ---
 
-## 3. POMDP State Transitions
+## POMDP State Transitions
+
+The environment is a Partially Observable Markov Decision Process because the agent never sees ground truth during an episode. It sees noisy signals and must infer fraud probability through Bayesian updates. The LSTM policy is structurally necessary because probe history changes how you interpret new evidence. A feedforward network loses that dependency.
 
 ```mermaid
 sequenceDiagram
@@ -105,9 +120,9 @@ sequenceDiagram
 
 ---
 
-## 4. Observation State Dimensions
+## Observation State Dimensions
 
-The POMDP represents the environment as an 18-dimensional multimodal continuous vector space. All values are scaled within `[0, 1]`.
+The state vector is 18 dimensions. Every value is normalized to [0,1] for stable gradient flow. Passive signals initialize at episode reset. Active signals initialize at 0.5 (maximum uncertainty) and update only when probed. The binary probe flags prevent redundant queries. The normalized step counter prevents infinite loops.
 
 | Matrix Vector | Attribute | Limits | Description |
 |---|---|---|---|
@@ -122,9 +137,9 @@ The POMDP represents the environment as an 18-dimensional multimodal continuous 
 
 ---
 
-## 5. Discrete Action Configuration
+## Discrete Action Space
 
-The action space consists of 7 explicit channels balancing final validation decisions against recursive data acquisition.
+Seven actions. Three terminal decisions (PASS, REJECT, FLAG). Four probe actions (BES, LQA, CCS, RSL). The reward structure is asymmetric because business costs are asymmetric. Admitting fraud destroys platform credibility (-2.5). Rejecting a real expert costs revenue (-1.0). Probing costs time (-0.02) but reduces uncertainty. Redundant probes are catastrophic (-0.20) because they waste resources without new information.
 
 **Action Mapping `Discrete(7)`**:
 - `0`: PASS
@@ -145,9 +160,9 @@ The action space consists of 7 explicit channels balancing final validation deci
 
 ---
 
-## 6. Docker Container Infrastructure
+## Docker Container Infrastructure
 
-The services leverage a single logical root map utilizing YAML component inheritance to achieve zero-redundancy scaling.
+Ten containers. Nine signal services plus one orchestrator. All derive from the same Dockerfile and requirements.txt. Zero redundancy. The orchestrator resolves service endpoints via Docker Compose internal DNS. No hardcoded IPs. No port conflicts. Each service exposes `/health` and `/api/v1/signals/{signal}`. Standard REST contracts. Any client can call them independently.
 
 ```mermaid
 graph TD
@@ -181,9 +196,14 @@ All 10 instances derive from one source `Dockerfile` referencing the shared `req
 
 ---
 
-## 7. Operational Roadmap Expansion
+## Production Roadmap
 
-- **State Distribution Normalization:** Introduce Layer Normalization across the Bayesian observation components to stabilize PPO value calculations further.
-- **Continuous Action Migration:** Extend Action outputs from isolated discrete selections to continuous multi-probe arrays resolving confidence parameters intrinsically within a single iteration.
-- **Real-Time Database Persistence:** Migrate the raw session logging within the Orchestrator `main.py` state dictionaries to a permanent scalable vector backend store (e.g. pgvector, Chroma) for post-mortem analysis and retraining cycles.
-- **Dynamic Action Masking:** Completely eliminate the possibility of selecting `PROBE_BES` when binary probe indicator `[12]` is active, enforcing 100% legal actions logically at the agent probability level.
+**Dynamic action masking:** Eliminate illegal actions at the policy level. If PROBE_BES already fired, mask it from the action distribution. Prevents redundant probes without penalty.
+
+**Continuous action space:** Replace discrete probes with continuous confidence parameters. Instead of "probe BES or not", output "probe BES with confidence threshold 0.8". Reduces action space dimensionality.
+
+**Vector database persistence:** Migrate session logs from JSON to pgvector or Chroma. Enables semantic search over historical fraud patterns. Supports continual learning from production data.
+
+**Layer normalization:** Stabilize PPO value estimates by normalizing observation components. Prevents gradient explosion when belief updates are large.
+
+**Real-time inference API:** Deploy trained policy as FastAPI endpoint. Input: candidate profile. Output: fraud probability + recommended probes. Latency target: <200ms per decision.

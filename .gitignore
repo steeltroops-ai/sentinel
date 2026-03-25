@@ -27,6 +27,7 @@ htmlcov/
 .vscode/
 .idea/
 *.iml
+.kiro/
 
 # Data / generated
 data/synthetic_profiles.json
@@ -34,10 +35,6 @@ data/eval_profiles.json
 data/validation_profiles.json
 *.db
 *.db-journal
-
-# MLflow
-mlruns/
-mlartifacts/
 
 # Jupyter
 .ipynb_checkpoints/

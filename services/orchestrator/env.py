@@ -5,7 +5,14 @@
 #   - Passive signals (TAV, SVP, FMD, MDC, TSI) are visible at reset.
 #   - Active signals (BES, LQA, CCS, RSL) require explicit probe actions.
 #
-# Observation (18D):
+# FIXES APPLIED (v2):
+#   - Observation space reduced from 18D to 16D (removed redundant belief dims)
+#   - Probe cost increased from -0.02 to -0.05 (aligned with memo)
+#   - Truncation logic fixed: timeout now penalizes -0.5 instead of rewarding FLAG
+#   - Action masking added to prevent redundant probes
+#   - Redundant probes no longer update signals or increment evidence count
+#
+# Observation (16D):
 #   [0]  fraud_belief          — Bayesian posterior (agent-maintained)
 #   [1]  confidence            — agreement across acquired signals
 #   [2]  tav_score             — passive: temporal anchoring violations
@@ -22,8 +29,6 @@
 #   [13] probed_lqa            — binary: has LQA been probed?
 #   [14] probed_ccs            — binary: has CCS been probed?
 #   [15] probed_rsl            — binary: has RSL been probed?
-#   [16] passive_belief        — weighted belief from passive-only signals
-#   [17] active_belief         — weighted belief from active-only signals (0.5 if unprobed)
 #
 # Action space — Discrete(7):
 #   0: PASS                — conclude real, terminate
@@ -89,7 +94,7 @@ class ExpertFraudEnv(gym.Env):
     R_FALSE_POS   = -1.0
     R_FLAG_HIT    = +0.3
     R_FLAG_MISS   = -0.2
-    R_PROBE       = -0.02   # Low cost: probing should be encouraged
+    R_PROBE       = +0.05   # v5: REWARD probing (encourage evidence gathering)
     R_REDUNDANT   = -0.20   # Harsh: don't waste time re-probing
 
     MAX_PROBES    = 4       # exactly 4 active signals to acquire
@@ -102,7 +107,7 @@ class ExpertFraudEnv(gym.Env):
         self.signal_client = signal_client
 
         self.observation_space = gym.spaces.Box(
-            low=0.0, high=1.0, shape=(18,), dtype=np.float32,
+            low=0.0, high=1.0, shape=(16,), dtype=np.float32,
         )
         self.action_space = gym.spaces.Discrete(7)
 
@@ -138,11 +143,27 @@ class ExpertFraudEnv(gym.Env):
         self._action_history: list[str] = []
         self._belief_history: list[float] = []
 
-    def _obs(self) -> np.ndarray:
-        """Construct 18D observation. Every dimension is unique and meaningful."""
-        passive_belief = self._compute_partial_belief(PASSIVE_SIGNALS)
-        active_belief  = self._compute_partial_belief(ACTIVE_SIGNALS)
+    def action_masks(self) -> list[bool]:
+        """
+        Return action mask for valid actions.
+        Terminal actions (PASS, REJECT, FLAG) are always valid.
+        Probe actions are invalid if already probed.
+        
+        Returns:
+            List of booleans where True = action is valid
+        """
+        masks = [True, True, True]  # PASS, REJECT, FLAG always valid
+        
+        # Probe actions: valid only if not yet probed
+        masks.append(not self.probed["bes"])   # PROBE_BES
+        masks.append(not self.probed["lqa"])   # PROBE_LQA
+        masks.append(not self.probed["ccs"])   # PROBE_CCS
+        masks.append(not self.probed["rsl"])   # PROBE_RSL
+        
+        return masks
 
+    def _obs(self) -> np.ndarray:
+        """Construct 16D observation. Every dimension is unique and meaningful."""
         return np.array([
             self.fraud_belief,                          # 0  aggregate belief
             self.confidence,                            # 1  signal agreement
@@ -160,8 +181,6 @@ class ExpertFraudEnv(gym.Env):
             float(self.probed["lqa"]),                  # 13 probed flag
             float(self.probed["ccs"]),                  # 14 probed flag
             float(self.probed["rsl"]),                  # 15 probed flag
-            passive_belief,                             # 16 passive-only belief
-            active_belief,                              # 17 active-only belief
         ], dtype=np.float32)
 
     def _compute_partial_belief(self, signal_set: tuple[str, ...]) -> float:
@@ -229,6 +248,7 @@ class ExpertFraudEnv(gym.Env):
             if self.probed[target]:
                 # Penalize redundant probing -- agent should learn not to repeat
                 reward += self.R_REDUNDANT
+                # Don't update the signal or increment evidence count
             else:
                 reward += self.R_PROBE
                 probe_result = self._execute_probe(target)
@@ -241,17 +261,21 @@ class ExpertFraudEnv(gym.Env):
 
         elif action == 0:  # PASS
             terminated = True
+            # v5: Penalize early decisions (< 2 probes)
+            early_decision_penalty = -0.3 if self.evidence_count < 2 else 0.0
             if self._true_label == "REAL":
-                reward += self.R_TRUE_PASS
+                reward += self.R_TRUE_PASS + early_decision_penalty
             else:
-                reward += self.R_FALSE_NEG
+                reward += self.R_FALSE_NEG + early_decision_penalty
 
         elif action == 1:  # REJECT
             terminated = True
+            # v5: Penalize early decisions (< 2 probes)
+            early_decision_penalty = -0.3 if self.evidence_count < 2 else 0.0
             if self._true_label == "FRAUD":
-                reward += self.R_TRUE_REJECT
+                reward += self.R_TRUE_REJECT + early_decision_penalty
             else:
-                reward += self.R_FALSE_POS
+                reward += self.R_FALSE_POS + early_decision_penalty
 
         elif action == 2:  # FLAG
             terminated = True
@@ -263,10 +287,10 @@ class ExpertFraudEnv(gym.Env):
         # ---- Truncation guard ----
         if not terminated and self.step_count >= self.MAX_STEPS:
             truncated = True
-            # Force FLAG on timeout
-            human_correct = self.np_random.random() < 0.70
-            reward += self.R_FLAG_HIT if human_correct else self.R_FLAG_MISS
-            action_name = "FLAG_TIMEOUT"
+            # Timeout is a failure - agent should decide before MAX_STEPS
+            # Penalize heavily to discourage stalling
+            reward += -0.5
+            action_name = "TIMEOUT"
 
         self._episode_reward += reward
         self._action_history.append(action_name)

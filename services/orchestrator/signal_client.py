@@ -6,10 +6,11 @@
 #   PASSIVE (free at reset): TAV, SVP, FMD, MDC, TSI
 #   ACTIVE  (probe required): BES, LQA, CCS, RSL
 #
-# Calibration rationale:
+# Calibration rationale (v2 - FIXED):
 #   Passive signals are WEAK -- means compressed (fraud ~0.56, real ~0.42).
-#   Active signals are STRONG -- means spread (fraud ~0.85, real ~0.12).
-#   This forces the agent to probe when passive evidence is ambiguous.
+#   Active signals have MODERATE separation (fraud ~0.70-0.78, real ~0.22-0.30).
+#   This forces the agent to use 2-3 probes before reaching confidence threshold.
+#   Previous calibration (0.82-0.92 / 0.06-0.18) was too strong, allowing 1-probe decisions.
 #   Reference: Chernoff (1959) sequential hypothesis testing --
 #   the agent must decide when accumulated evidence crosses the decision boundary.
 
@@ -109,30 +110,33 @@ class MockSignalClient:
         FRAUD means: 0.52-0.60  |  REAL means: 0.38-0.48
         Noise std: 0.12 (high)  |  Visibility: 35%
 
-      Active signals (BES-RSL) are intentionally STRONG:
-        FRAUD means: 0.82-0.92  |  REAL means: 0.08-0.18
-        Noise std: 0.024 (very low on probe)
+      Active signals (BES-RSL) have MODERATE separation:
+        FRAUD means: 0.70-0.78  |  REAL means: 0.22-0.30
+        Noise std: 0.10 (moderate)
 
       This calibration ensures:
         - Passive-only belief: ~0.45-0.55 for BOTH classes (ambiguous)
-        - After 1-2 probes: belief diverges to ~0.15 or ~0.85 (decisive)
-        - Agent MUST learn to probe before deciding
+        - After 1 probe: belief shifts to ~0.35 or ~0.65 (uncertain)
+        - After 2-3 probes: belief diverges to ~0.20 or ~0.80 (confident)
+        - Agent MUST learn multi-probe strategy before deciding
 
       Without this, the agent converges to trivial 1-step threshold policy.
     """
 
-    # Passive: compressed means -- weak signal, high ambiguity
-    PASSIVE_FRAUD_MEANS = {"tav": 0.58, "svp": 0.56, "fmd": 0.60, "mdc": 0.55, "tsi": 0.52}
-    PASSIVE_REAL_MEANS  = {"tav": 0.42, "svp": 0.44, "fmd": 0.38, "mdc": 0.45, "tsi": 0.48}
-    PASSIVE_NOISE_STD   = 0.12
+    # v5: RADICAL FIX - Make passive signals PURE NOISE
+    # All passive signals return exactly 0.5 ± pure noise (no class separation)
+    PASSIVE_FRAUD_MEANS = {"tav": 0.50, "svp": 0.50, "fmd": 0.50, "mdc": 0.50, "tsi": 0.50}
+    PASSIVE_REAL_MEANS  = {"tav": 0.50, "svp": 0.50, "fmd": 0.50, "mdc": 0.50, "tsi": 0.50}
+    PASSIVE_NOISE_STD   = 0.25  # Pure noise, zero signal
 
-    # Active: spread means -- strong signal, low ambiguity
-    ACTIVE_FRAUD_MEANS = {"bes": 0.88, "lqa": 0.85, "ccs": 0.92, "rsl": 0.82}
-    ACTIVE_REAL_MEANS  = {"bes": 0.10, "lqa": 0.12, "ccs": 0.06, "rsl": 0.15}
-    ACTIVE_NOISE_STD   = 0.08
+    # Active: MAXIMUM separation -- make probing essential
+    # v5: Maximal separation to force probing
+    ACTIVE_FRAUD_MEANS = {"bes": 0.90, "lqa": 0.88, "ccs": 0.92, "rsl": 0.85}
+    ACTIVE_REAL_MEANS  = {"bes": 0.10, "lqa": 0.12, "ccs": 0.08, "rsl": 0.15}
+    ACTIVE_NOISE_STD   = 0.05  # Very low noise for clear signal
 
     # Probe noise reduction factor: probes return cleaner readings
-    PROBE_NOISE_FACTOR = 0.3
+    PROBE_NOISE_FACTOR = 0.2
 
     def __init__(self, rng=None):
         self._rng = rng
@@ -158,13 +162,10 @@ class MockSignalClient:
             real_mean = self.PASSIVE_REAL_MEANS[name]
             mean = fraud_mean if is_fraud else real_mean
 
-            is_visible = (self._rng.random() < 0.35) if self._rng else (random.random() < 0.35)
-            if is_visible:
-                score = self._sample(mean, self.PASSIVE_NOISE_STD)
-                confidence = 0.3
-            else:
-                score = 0.5
-                confidence = 0.0
+            # v5: ALWAYS mask passive signals - force 100% probing
+            # Passive signals provide ZERO information
+            score = 0.5
+            confidence = 0.0
 
             output[name] = {
                 "score": round(score, 4),

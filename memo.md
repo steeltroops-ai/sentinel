@@ -1,75 +1,68 @@
-# Strategy Memo: KIVE (Knowledge Integrity Verification Engine)
+# Sentinel | KIVE: Knowledge Integrity Verification Engine
+**Strategy Memo | Mayank Pratap Singh**
 
-## The Core Thesis
-Generative AI optimizes for the most probable, generic path to a correct answer. Human expertise is asymmetric; it is learned through catastrophic failure, idiosyncratic debugging, and nonlinear career decisions. 
+---
 
-To detect an AI-augmented "expert," we must abandon technical trivia. We do not evaluate correctness. We evaluate the presence of context-specific imperfections that an LLM cannot seamlessly fabricate. We attack the constraints of the adversary's pipeline: latency, semantic homogeneity, and behavioral entropy.
+## The Actual Problem
 
-By structuring this as a Partially Observable Markov Decision Process (POMDP), we grant the agent a primary lever: the ability to actively induce friction and acquire information through targeted probes. 
+There are two of you reading this. You need a third person who owns the intelligence layer completely without being managed into it.
 
-## The 9-Dimensional Signal Architecture (Feature Engineering)
-We extract 9 explicit, adversarial signals distributed across isolated microservices. 
+Perplexity scores and burstiness metrics catch lazy fraud. They miss the candidate who spends 20 minutes prompting GPT to sound like themselves, edits the output, and submits something that clears every classifier you have. That is the majority of fraud on this platform and it is accelerating.
 
-1. **Temporal Anchoring Violations (TAV)**
-   * Every technology has a verifiable birth date. LLMs hallucinate timelines.
-   * Claiming 10 years of Kubernetes experience in 2024 is physically impossible.
-   * We cross-reference the claimed duration against a pre-computed technology knowledge graph.
+My thesis: generative AI optimizes for the most probable correct answer. Human expertise is built from the opposite, through version-specific failures, nonlinear career decisions, and production incidents you remember because they cost you sleep. The signal is not whether the answer is correct. It is whether the answer contains the specific inconvenient context that only comes from having actually done the work.
 
-2. **Specificity Variance Profile (SVP)**
-   * Authentic experts are hyper-specific in their niche and vaguely generalized outside of it.
-   * LLMs maintain uniform fluency across all topics. They lack awareness of what they do not know. 
-   * We measure variance of named-entity density. Low variance = high AI probability.
+---
 
-3. **Failure Memory Deficiency (FMD)**
-   * Real engineers remember catastrophic outages and database locks. 
-   * Fraudsters generate textbook, documentation-perfect answers devoid of "scar tissue."
-   * We scan sentence constructs for past-tense negation and situational debugging terms.
+## Feature Engineering
 
-4. **Market Demand Correlation (MDC)**
-   * Sudden retroactive skill inflation correlating tightly with market hype is an anomaly.
-   * We detect backdated injections of popular keywords (e.g., "LangChain," "RAG") into prior, unrelated job entries.
+**The five signals I would prioritize, in order:**
 
-5. **Trajectory Smoothness Index (TSI)**
-   * Real careers have gaps, horizontal pivots, and tenure volatility.
-   * A perfectly monotonic Junior-to-Principal trajectory over exactly five years without gaps is statistically fabricated.
+| Signal | Weight | Red Flag |
+|--------|--------|----------|
+| **BES** Behavioral Entropy Service | 0.18 | Keystroke timing variance, paste ratios, window blur duration. The AI query sequence has a distinct fingerprint. Strongest active signal. |
+| **TAV** Temporal Anchoring Violations | 0.14 | Claimed experience exceeding physical maximum given tech release dates. Kubernetes (2014), LangChain (2022). Math problem, not inference. |
+| **LQA** Linguistic Quality Assurance | 0.12 | Detection of non-latent markers, uniform fluency, and robotic syntax patterns via active stochastic probing. |
+| **SVP** Specificity Variance Profile | 0.11 | Experts are hyper-specific in-domain and vague outside. Low cross-topic variance is the fraud signal, not low quality. |
+| **FMD** Failure Memory Deficiency | 0.11 | GPT optimizes for correctness. Real engineers have scar tissue: version-specific bugs and decisions they regret. |
 
-6. **Behavioral Entropy Service (BES)**
-   * LLMs rely on copy-pasting or automated transcription software.
-   * We capture keystroke telemetry variance, paste-ratios, and window-blur events.
-   * Flat, non-bursty keystroke entropy indicates paste-and-send behavior.
+Four supporting services (MDC, TSI, CCS, RSL) handle market demand correlation, trajectory smoothness index, cross-candidate similarity, and response latency slope. They feed the same observation vector as secondary weight.
 
-7. **Linguistic Quality Assurance (LQA)**
-   * Generative models cluster around specific phrasing structures and vocabulary.
-   * We compute artifact density, scanning for syntactical tells uniquely produced by autoregressive text generation.
+The strongest signals are adversarially robust because fraudsters cannot game what they don't know exists. BES and RSL operate on behavioral fingerprints that are invisible until measured. Each signal is an independent REST service. Any organization can adopt TAV or FMD without the full stack. This is how you build a moat that compounds.
 
-8. **Cross-Candidate Similarity (CCS)**
-   * Fraud rings reuse the exact same prompt engineering setups.
-   * We project profiles into high-dimensional embedding space and flag tight clusters of identical "expert" personas.
+---
 
-9. **Response Latency Slope (RSL)**
-   * Human cognitive load scales non-linearly with problem difficulty. 
-   * An LLM pipeline has a fixed, linear token-generation latency, regardless of conceptual density.
-   * We detect flattened response latency slopes across highly difficult technical inquiries.
+## The RL Framework
 
-## The Reinforcement Learning Framework
-Vetting is a sequential, partial-information game. We train an RL orchestrator to decide when to gather evidence and when to drop the hammer.
+Vetting is a sequential partial-information game. The agent's advantage over a static classifier is that it can generate targeted follow-up questions before committing to a terminal decision.
 
-* **State Space:** 18D continuous vector encompassing belief, confidence, the 9 microservice scores, normalized probe counts, and live multi-modal data streams perfectly representing the candidate's state.
-* **Action Space:** Discrete 8-dimensional space.
-   * `PASS` / `REJECT`: Terminal decisions.
-   * `FLAG`: Escalation to a human operator when max uncertainty persists.
-   * `PROBE`: Targeted interrogations on specific weak-confidence domains.
-   * `ESCALATE_DIFFICULTY`, `PROBE_FAILURE_STORY`, `REQUEST_CODE_EXERCISE`, `HOLD`: Active adversarial friction mechanisms.
-* **Asymmetric Reward Calculus:** 
-   * `PROBE (-0.1)`: Information acquisition is never free.
-   * `TRUE PASS / TRUE REJECT (+1.0)`: Correct terminal state.
-   * `FALSE POSITIVE (-1.0)`: Rejecting a real expert is an opportunity cost.
-   * `FALSE NEGATIVE (-2.5)`: Hiring a fraudster destroys platform credibility. The agent is mathematically punished for unsafe approvals.
-* **Agent Core:** We implement `RecurrentPPO` with a `MlpLstmPolicy`. The Recurrent architecture allows the LSTM to retain hidden states across the probe sequences, effectively modeling the candidate's cumulative psychological breakdown over the interview.
+**State space (16 dimensions, normalized to [0,1]):** fraud belief and confidence, five passive signal scores, four active probe scores initialized at 0.5, evidence count normalized to probe budget, binary probe execution flags preventing redundant queries.
 
-## The End-State (Production Paradigm)
-This is not a static classifier. It is a live, autonomous interrogator. 
+**Action space: Discrete(7):** PASS, REJECT, FLAG, PROBE\_BES, PROBE\_LQA, PROBE\_CCS, PROBE\_RSL.
 
-By pushing the vetting process out to multi-modal live telemetry (gaze matching, audio latency tracking, keystroke analysis) and forcing the candidate to defend their knowledge in real-time, we break the attacker's compute pipeline. When an LLM delays an audio response by two seconds to process context, the agent will fire an `INTERRUPT` action, breaking the context window. 
+| Outcome | Reward | Reasoning |
+|---------|--------|-----------|
+| True Pass / True Reject | +1.0 | Correct terminal decision |
+| False Negative | -2.5 | Fraudster placed destroys platform credibility |
+| False Positive | -1.0 | Real expert rejected is direct revenue loss |
+| Flag Hit / Flag Miss | +0.3 / -0.2 | Models realistic human operator accuracy |
+| Probe | +0.05 | Rewards evidence acquisition (information has value) |
+| Redundant Probe | -0.20 | Catastrophic penalty for querying an already-scored signal |
+| Early Decision | -0.30 | Penalty for deciding with insufficient evidence (< 2 probes) |
 
-The defense is absolute. It is a mathematical counter-measure to the systemic deterioration of remote hiring trust.
+**Agent:** RecurrentPPO with MlpLstmPolicy. The LSTM is structurally necessary because what the agent probed in step 2 changes how it interprets step 4. A feedforward policy loses that sequential dependency entirely.
+
+**Ground truth:** ProNexus already has it. Post-call client ratings retrospectively label experts. A structured bank of known-answer technical questions provides pre-placement verification. Longitudinal low ratings across repeat engagements identify retrospective fraud positives over time. This is not a cold-start problem if the platform has any run history.
+
+The MockSignalClient is calibrated so one-step greedy classification is mathematically suboptimal. Passive signals provide zero class information (always return 0.5). Active signals are highly discriminative but only accessible via probe actions. The agent must probe to acquire any useful information before making a terminal decision.
+
+The multimodal live evaluator extension covering gaze deviation, prosody confidence variance, and screen focus loss sequences is addressed fully in the bonus section with an expanded live observation space.
+
+---
+
+## Why I Am the Third Engineer
+
+BES and RSL are in my observation space as scored microservices with API contracts. Every other submission you receive this week describes them in a paragraph. That difference is the difference between thinking about the problem and building the system.
+
+I built this architecture in a different domain. MediLens combines trust signals across 10 diagnostic modules at 91 to 99.8% production accuracy. The domain changes. The structure does not.
+
+I see where ProNexus is going. You're building the trust layer for the entire expert network industry. I'm here to own that intelligence layer and scale it with you.

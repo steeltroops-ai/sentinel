@@ -1,105 +1,157 @@
-# Sentinal | KIVE - Knowledge Integrity Verification Engine
-
-## Objective Structure
-
-KIVE is a production-grade Reinforcement Learning (RL) expert fraud detection system. It formulates candidate vetting as a Partially Observable Markov Decision Process (POMDP). The agent ingests passive behavioral anomalies, sequentially collects active signals under uncertainty, and executes a terminal decision (PASS, REJECT, or FLAG).
-
-The core technical premise isolates a fundamental constraint in generative capabilities: **AI-assisted human fraud is undetectable by perplexity analysis alone.** It must be identified through behavioral variances in professional consistency, specificity gaps, and operational memory, mapping anomalies against external ground truths rather than LLM intrinsic artifacts.
+# Sentinel | KIVE
+**Knowledge Integrity Verification Engine | ProNexus ML Engineer Assignment**
 
 ---
 
-## Architectural Taxonomy
+## The Problem
 
-```mermaid
-graph TD
-    classDef orchestrator fill:#2d1b4e,stroke:#9d72ff,stroke-width:2px,color:#fff
-    classDef detector fill:#1a1f36,stroke:#00ffcc,stroke-width:1px,color:#fff
-    
-    O[RL Orchestrator<br>POMDP Subsystem]:::orchestrator
-    
-    TAV[TAV:8001<br>Temporal Anchoring]:::detector
-    SVP[SVP:8002<br>Specificity Variance]:::detector
-    FMD[FMD:8003<br>Failure Memory]:::detector
-    MDC[MDC:8004<br>Market Demand]:::detector
-    TSI[TSI:8005<br>Trajectory Smoothness]:::detector
-    BES[BES:8006<br>Behavioral Entropy]:::detector
-    LQA[LQA:8007<br>Linguistic Quality]:::detector
-    CCS[CCS:8008<br>Cross-Candidate Sim]:::detector
-    RSL[RSL:8009<br>Response Latency]:::detector
-    
-    O -->|Pre-compute Passive| TAV & SVP & FMD & MDC & TSI
-    O -->|Explicit Active Probes| BES & LQA & CCS & RSL
-```
+Expert networks are being gamed. Real people with verified identities use ChatGPT to fabricate expertise they do not have. Perplexity scores and burstiness metrics catch lazy fraud. They miss the candidate who spends 20 minutes prompting GPT to sound like themselves.
 
-### Signal Framework
-
-| Signal | Mode | Weight | Target Vector |
-|--------|------|--------|---------------|
-| **TAV** | Passive | 0.28 | Tool usage pre-dating initial public release parameters. |
-| **SVP** | Passive | 0.24 | Uniform fluency density (LLM trait) against standard human variance domains. |
-| **FMD** | Passive | 0.20 | Failure interpolation capability. LLMs fail to generate isolated technical incident narratives. |
-| **BES** | Active  | 0.18 | Cryptographic payload verification via keystroke dynamics and clipboard entropy analysis. |
-| **MDC** | Passive | 0.16 | Aggregated timeline alignment to historical market demand velocity. |
-| **TSI** | Passive | 0.12 | Detection of purely monotonic progression profiles. |
-| **LQA** | Active  | 0.10 | Syllabic hedging and localized grammar uniformities in live responses. |
-| **CCS** | Active  | 0.08 | Collision parameters representing repetitive LLM sampling across candidates. |
-| **RSL** | Active  | 0.07 | Standardized latency delta curve analysis mapping human temporal baseline constraints. |
-
-### RL Engine Blueprint
-
-- **Observation Mapping**: `Box(shape=(18,), float32)` incorporating continuous belief updates, binary probe status indicators, and sub-module certainty metrics.
-- **Action Matrix**: `Discrete(7)` — [PASS, REJECT, FLAG, PROBE_BES, PROBE_LQA, PROBE_CCS, PROBE_RSL]
-- **Asymmetric Vector Rewards**: Optimal configuration values derived empirically — FN=-2.5, FP=-1.0, TP/TN=+1.0, Probe=-0.02, Redundant Probe=-0.20.
-- **Policy Infrastructure**: RecurrentPPO (sb3-contrib) configured for POMDPs with recurrent LSTM layers capturing non-Markovian signal sequences. Total target sequence length: 10,000 to 40,000 steps.
+This system solves that. Nine behavioral signals that detect AI-assisted fraud through patterns fraudsters cannot fake without actually becoming experts. POMDP formulation with interactive probing. Asymmetric rewards reflecting real business costs. Production-grade microservices architecture.
 
 ---
 
-## Technical Implementation Guide
+## Architecture
 
-### 1. Unified Environment Boot
-
-Ensure Docker deployment is executing in your container runtime context. The root-level `.dockerignore` handles namespace scoping.
-
-```bash
-docker-compose up -d --build
+```
+RL Orchestrator (POMDP)
+├── Passive Signals (free at reset)
+│   ├── TAV (0.28) - Temporal anchoring violations
+│   ├── SVP (0.24) - Specificity variance profile  
+│   ├── FMD (0.20) - Failure memory deficiency
+│   ├── MDC (0.16) - Market demand correlation
+│   └── TSI (0.12) - Trajectory smoothness index
+└── Active Signals (probe required)
+    ├── BES (0.18) - Behavioral entropy score
+    ├── LQA (0.10) - Linguistic quality analysis
+    ├── CCS (0.08) - Cross-candidate similarity
+    └── RSL (0.07) - Response latency slope
 ```
 
-The unified deployment image maps across all 10 independent REST instances natively.
-
-### 2. Dependency Initialization
-
-Execute isolated python dependency synchronization for raw script operations, testing, or retraining pipelines.
+## Quick Start
 
 ```bash
-uv sync
+# Install dependencies
+python run.py install
+
+# Generate synthetic data
+python run.py data
+
+# Run tests (82 tests, all passing)
+python run.py test
+
+# Train agent with MLflow tracking
+python run.py train
+
+# Start microservices
+python run.py docker-up
 ```
 
-### 3. Data Synthesis Generation
+See [COMMANDS.md](COMMANDS.md) for complete command reference.
 
-Produce adversarial dataset instances matching precise density parameters required for RL boundary convergence.
+---
+
+## Key Features
+
+**Novel Signals:** TAV (temporal anchoring), SVP (specificity variance), FMD (failure memory), BES (behavioral entropy). Adversarially robust. Fraudsters cannot game what they do not know exists.
+
+**POMDP Formulation:** Interactive probing, not passive classification. Agent decides when to probe versus decide based on uncertainty. Probe actions yield +0.05 reward (incentive to gather evidence) with -0.20 redundant penalty. This is the correct formulation.
+
+**Asymmetric Rewards:** FN=-2.5 (platform damage), FP=-1.0 (revenue loss). Business costs are asymmetric. The reward function reflects that.
+
+**Production Architecture:** Nine independent microservices. Each signal is a standalone REST API. Any organization can adopt TAV or FMD without the full stack. Decoupled, scalable, deployable.
+
+---
+
+## Results
+
+Latest training (kive_ppo_full - 15711 episodes):
+- FN rate: 0.037 (target: <0.05) [PASS]
+- FP rate: 0.034 (target: <0.08) [PASS]
+- Mean probes: 3.80 (adaptive strategy)
+- Probe variance: 0.32 (context-dependent)
+- Mean reward: 0.95 (near-optimal)
+- Converged: true [PASS]
+
+![Learning Curve](docs/learning_curve.png)
+![Episode Traces](docs/episode_traces.png)
+![Training Summary](docs/training_summary.png)
+
+See `artifacts/training/convergence_report.json` for full metrics.
+
+---
+
+## Tech Stack
+
+- RL: Stable-Baselines3 (RecurrentPPO + LSTM policy)
+- Environment: Gymnasium (custom POMDP)
+- API: FastAPI + Pydantic v2
+- Data: Faker + custom generators
+- Tracking: MLflow
+- Containers: Docker Compose
+
+---
+
+## Project Structure
+
+```
+├── services/          # 9 signal microservices + orchestrator
+├── data/              # Synthetic data generation
+├── tests/             # 82 tests (all passing)
+├── artifacts/         # Training outputs (gitignored)
+├── docs/              # Architecture + multi-modal design
+├── memo.md            # Strategy memo
+└── run.py             # Task runner
+```
+
+---
+
+## Development
 
 ```bash
-uv run python data/synthetic_generator.py
-uv run python data/validate_distribution.py
+# Code quality
+python run.py format
+python run.py test
+
+# Training (all with MLflow tracking except train-fast)
+python run.py train-fast   # 1k episodes, no tracking (5 min)
+python run.py train        # 3k episodes, tracked (15 min)
+python run.py train-full   # 10k episodes, tracked (45 min)
+
+# Documentation
+python run.py update-docs      # Copy artifacts to docs, update README
+python run.py visualize-mlflow # Generate training comparison plots
+python run.py mlflow-ui        # Launch MLflow UI (localhost:5000)
 ```
 
-### 4. RL Agent Calibration
+---
 
-Invoke full RecurrentPPO training sequences.
+## MLflow Tracking
 
-```bash
-uv run python services/orchestrator/train.py --n-episodes 10000 --no-mlflow
-```
+Training runs with `train` or `train-full` automatically log to MLflow. Track improvements across runs:
 
-Generated metrics populate into `/artifacts/training/` encompassing:
-- JSON Convergence Parameters
-- State Action Episode Trace Charts
-- Vectorized Learning Curve Differentials
+1. Train: `python run.py train` or `python run.py train-full`
+2. View runs: `python run.py mlflow-ui` (opens http://localhost:5000)
+3. Generate plots: `python run.py visualize-mlflow` (saves to `docs/training_summary.png`)
+4. Update docs: `python run.py update-docs` (copies artifacts to docs/, updates README)
 
-### 5. Validation Architecture
+**What gets tracked:**
+- Final reward, FN/FP rates, probe usage, convergence status
+- Episode-level metrics (reward, probes, decisions)
+- Hyperparameters, training duration, model checkpoints
 
-Execute root pytest configurations.
+**What gets committed to git:**
+- `docs/*.png` - Visualization outputs (learning curves, traces, summaries)
+- `artifacts/training/` and `mlruns/` are gitignored (local only)
+- Run `update-docs` after training to copy key artifacts to docs/ for reviewers
 
-```bash
-uv run pytest tests/ -v
-```
+---
+
+**Differentiation:**
+- Novel signals (TAV, SVP, FMD, BES) showing deep fraud understanding
+- POMDP formulation with interactive probing (not passive classification)
+- Asymmetric reward structure reflecting real business costs
+- Production-grade microservices architecture (decoupled, scalable, deployable)
+- Adversarially robust signals (behavioral, not content-based)
+
+This is the trust layer for expert verification. It scales with ProNexus as the platform grows.

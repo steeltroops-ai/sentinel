@@ -35,7 +35,10 @@ _signal_client: SignalClient | MockSignalClient | None = None
 _start_time = time.time()
 
 SERVICE_VERSION = "1.0.0"
-SIGNAL_WEIGHTS = {"tav": 0.28, "svp": 0.24, "fmd": 0.20, "mdc": 0.16, "tsi": 0.12}
+SIGNAL_WEIGHTS = {
+    "tav": 0.14, "svp": 0.11, "fmd": 0.11, "mdc": 0.09, "tsi": 0.07,
+    "bes": 0.18, "lqa": 0.12, "ccs": 0.10, "rsl": 0.08,
+}
 
 
 @asynccontextmanager
@@ -172,10 +175,10 @@ async def submit_probe_response(
     if session["evidence_count"] >= 5:
         raise HTTPException(400, detail="Max probes reached — call /decision to terminate")
 
-    # Identify weakest signal dimension to probe
+    # Identify weakest active signal dimension to probe
     scores = session["signal_scores"]
-    ambiguity = {k: 1.0 - abs(v - 0.5) * 2 for k, v in scores.items() if k in ("tav", "svp", "fmd")}
-    target = max(ambiguity, key=ambiguity.get) if ambiguity else "fmd"
+    ambiguity = {k: 1.0 - abs(v - 0.5) * 2 for k, v in scores.items() if k in ("bes", "lqa", "ccs", "rsl")}
+    target = max(ambiguity, key=ambiguity.get) if ambiguity else "bes"
 
     # Build probe profile with the answer injected
     probe_profile = _ProbeProxy(session["profile"], request.probe_answer, request.latency_ms)
@@ -246,8 +249,8 @@ async def get_decision(session_id: str) -> DecisionResponse:
 
     if action == "PROBE":
         scores = session["signal_scores"]
-        ambiguity = {k: 1.0 - abs(v - 0.5) * 2 for k, v in scores.items() if k in ("tav", "svp", "fmd")}
-        probe_target = max(ambiguity, key=ambiguity.get) if ambiguity else "fmd"
+        ambiguity = {k: 1.0 - abs(v - 0.5) * 2 for k, v in scores.items() if k in ("bes", "lqa", "ccs", "rsl")}
+        probe_target = max(ambiguity, key=ambiguity.get) if ambiguity else "bes"
         probe_question = _generate_probe_question(probe_target, scores)
 
     session["action"] = action

@@ -14,13 +14,13 @@ def _make_env():
 def test_observation_space():
     env = _make_env()
     obs, _ = env.reset()
-    assert obs.shape == (18,), f"Expected (18,), got {obs.shape}"
+    assert obs.shape == (16,), f"Expected (16,), got {obs.shape}"
     assert obs.dtype == np.float32
     assert all(0.0 <= v <= 1.0 for v in obs), f"Obs out of [0,1]: {obs}"
 
 
 def test_observation_no_duplicates():
-    """All 18 observation dimensions must be independently computed -- no duplicates."""
+    """All 16 observation dimensions must be independently computed -- no duplicates."""
     env = _make_env()
     obs, _ = env.reset(seed=42)
     # Probe all 4 active signals to populate them
@@ -43,12 +43,12 @@ def test_observation_no_duplicates():
 
 
 def test_passive_signals_populated_at_reset():
-    """Passive signals (TAV-TSI) should have non-trivial values at reset."""
+    """v5: Passive signals are ALWAYS 0.5 (pure noise, force probing)."""
     env = _make_env()
     obs, _ = env.reset(seed=1)
-    # obs[2:7] are passive signals. At least some should differ from 0.5
+    # obs[2:7] are passive signals. v5: All should be 0.5 (no information)
     passive = obs[2:7]
-    assert not all(v == 0.5 for v in passive), f"All passive signals are 0.5: {passive}"
+    assert all(v == 0.5 for v in passive), f"Passive signals should all be 0.5: {passive}"
 
 
 def test_active_signals_start_uninformative():
@@ -76,7 +76,7 @@ def test_probe_does_not_terminate():
     obs, reward, terminated, truncated, info = env.step(3)  # PROBE_BES
     assert not terminated
     assert not truncated
-    assert reward == pytest.approx(-0.02, abs=1e-6)
+    assert reward == pytest.approx(0.05, abs=1e-6)  # v5: Probe reward
     assert info["action"] == "PROBE_BES"
     assert info["evidence_count"] == 1
 
@@ -99,11 +99,12 @@ def test_false_negative_penalty():
     env._true_label = "FRAUD"
     _, reward, terminated, _, _ = env.step(0)  # PASS
     assert terminated
-    assert reward == pytest.approx(-2.5, abs=1e-6)
+    # v5: -2.5 (false negative) + -0.3 (early decision penalty, 0 probes)
+    assert reward == pytest.approx(-2.8, abs=1e-6)
 
 
 def test_true_reject_reward():
-    """REJECT on a FRAUD profile must return +1.0."""
+    """REJECT on a FRAUD profile must return +1.0 (or less with early decision penalty)."""
     gen = ProfileGenerator(fraud_ratio=1.0)
     client = MockSignalClient()
     env = ExpertFraudEnv(gen, client)
@@ -111,11 +112,12 @@ def test_true_reject_reward():
     env._true_label = "FRAUD"
     _, reward, terminated, _, _ = env.step(1)  # REJECT
     assert terminated
-    assert reward == pytest.approx(1.0, abs=1e-6)
+    # v5: +1.0 (true reject) + -0.3 (early decision penalty, 0 probes)
+    assert reward == pytest.approx(0.7, abs=1e-6)
 
 
 def test_true_pass_reward():
-    """PASS on a REAL profile must return +1.0."""
+    """PASS on a REAL profile must return +1.0 (or less with early decision penalty)."""
     gen = ProfileGenerator(fraud_ratio=0.0)
     client = MockSignalClient()
     env = ExpertFraudEnv(gen, client)
@@ -123,11 +125,12 @@ def test_true_pass_reward():
     env._true_label = "REAL"
     _, reward, terminated, _, _ = env.step(0)  # PASS
     assert terminated
-    assert reward == pytest.approx(1.0, abs=1e-6)
+    # v5: +1.0 (true pass) + -0.3 (early decision penalty, 0 probes)
+    assert reward == pytest.approx(0.7, abs=1e-6)
 
 
 def test_false_positive_penalty():
-    """REJECT on a REAL profile must return -1.0."""
+    """REJECT on a REAL profile must return -1.0 (or less with early decision penalty)."""
     gen = ProfileGenerator(fraud_ratio=0.0)
     client = MockSignalClient()
     env = ExpertFraudEnv(gen, client)
@@ -135,7 +138,8 @@ def test_false_positive_penalty():
     env._true_label = "REAL"
     _, reward, terminated, _, _ = env.step(1)  # REJECT
     assert terminated
-    assert reward == pytest.approx(-1.0, abs=1e-6)
+    # v5: -1.0 (false positive) + -0.3 (early decision penalty, 0 probes)
+    assert reward == pytest.approx(-1.3, abs=1e-6)
 
 
 def test_truncation_at_max_steps():
