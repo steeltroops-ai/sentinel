@@ -1,0 +1,13 @@
+{
+  "run_name": "kive_ppo_full",
+  "n_episodes_target": 10000,
+  "n_episodes_actual": 15720,
+  "final_mean_reward": 1.1068,
+  "final_std_reward": 0.272,
+  "fn_rate": 0.003,
+  "fp_rate": 0.002,
+  "mean_probes_per_episode": 3.802,
+  "probe_variance": 0.263,
+  "degenerate_policy": true,
+  "converged": false
+}

@@ -139,11 +139,6 @@ Training runs with `train` or `train-full` automatically log to MLflow. Track im
 - Episode-level metrics (reward, probes, decisions)
 - Hyperparameters, training duration, model checkpoints
 
-**What gets committed to git:**
-- `docs/*.png` - Visualization outputs (learning curves, traces, summaries)
-- `artifacts/training/` and `mlruns/` are gitignored (local only)
-- Run `update-docs` after training to copy key artifacts to docs/ for reviewers
-
 ---
 
 **Differentiation:**
