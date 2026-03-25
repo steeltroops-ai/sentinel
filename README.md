@@ -65,21 +65,19 @@ See [COMMANDS.md](COMMANDS.md) for complete command reference.
 
 ## Results
 
-Latest training (kive_ppo_full - 15711 episodes):
-- FN rate: 0.037 (target: <0.05) [PASS]
-- FP rate: 0.034 (target: <0.08) [PASS]
-- Mean probes: 3.80 (adaptive strategy)
-- Probe variance: 0.32 (context-dependent)
-- Mean reward: 0.95 (near-optimal)
+Latest training (kive_ppo_full - 17041 episodes):
+- FN rate: 0.022 (target: <0.05) [PASS]
+- FP rate: 0.012 (target: <0.08) [PASS]
+- Mean probes: 3.78 (adaptive strategy)
+- Probe variance: 0.34 (context-dependent)
+- Mean reward: 1.04 (near-optimal)
 - Converged: true [PASS]
 
 ![Learning Curve](docs/learning_curve.png)
 ![Episode Traces](docs/episode_traces.png)
-![Training Summary](docs/training_summary.png)
 
-See `artifacts/training/convergence_report.json` for full metrics.
+See `artifacts/training/convergence_report.json` for details.
 
----
 
 ## Tech Stack
 
@@ -97,6 +95,7 @@ See `artifacts/training/convergence_report.json` for full metrics.
 ```
 ├── services/          # 9 signal microservices + orchestrator
 ├── data/              # Synthetic data generation
+├── notebooks/         # Signal analysis & training visualization
 ├── tests/             # 82 tests (all passing)
 ├── artifacts/         # Training outputs (gitignored)
 ├── docs/              # Architecture + multi-modal design
@@ -153,5 +152,10 @@ Training runs with `train` or `train-full` automatically log to MLflow. Track im
 - Asymmetric reward structure reflecting real business costs
 - Production-grade microservices architecture (decoupled, scalable, deployable)
 - Adversarially robust signals (behavioral, not content-based)
+
+### Analytical Notebooks
+
+- `notebooks/01_signal_analysis.ipynb`: Statistical analysis of passive vs active signals. Distribution checks for TAV, SVP, etc. to ensure thresholds are correctly calibrated for discriminator training.
+- `notebooks/02_rl_training.ipynb`: Deep dive into agent policy development. Visualizes agent's exploration vs exploitation across the full 15k+ episode training run.
 
 This is the trust layer for expert verification. It scales with ProNexus as the platform grows.
